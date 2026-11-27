@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Menu from '../components/Menu.jsx';
 import { cancelAppt } from './FrontDesk.jsx';
 import { useDb, useUi, setUi, run, update, toast } from '../data/store.js';
-import { P, waLink, remind } from '../data/selectors.js';
+import { P, contactItems, remind } from '../data/selectors.js';
 import { addToQueue } from '../data/actions.js';
 import { callLists, markCalled, moveBack, closeFU } from '../logic/followups.js';
 import { today, addDays, fmtS } from '../logic/format.js';
@@ -28,8 +28,8 @@ export default function Calendar() {
         <span className="acts">
           <button type="button" className={'btn sm' + (isCalled ? ' primary' : '')} onClick={() => setUi({ book: { pid: p.id, reason: v.nextReason } })}>Book</button>
           <Menu label={`More actions for ${p.name}`} items={isCalled
-            ? [{ label: 'WhatsApp again', href: waLink(p, msg) }, { label: 'Call again', href: 'tel:+91' + p.mobile }, { label: 'Move back to “To call”', onClick: () => update((d) => moveBack(d, v.id)) }, closeIt]
-            : [{ label: 'WhatsApp', href: waLink(p, msg) }, { label: 'Call', href: 'tel:+91' + p.mobile }, { label: 'Mark as called', onClick: () => { update((d) => markCalled(d, v.id)); toast('Moved to “Called, not booked yet”'); } }, closeIt]} />
+            ? [...contactItems(p, msg, ' again'), { label: 'Move back to “To call”', onClick: () => update((d) => moveBack(d, v.id)) }, closeIt]
+            : [...contactItems(p, msg), { label: 'Mark as called', onClick: () => { update((d) => markCalled(d, v.id)); toast('Moved to “Called, not booked yet”'); } }, closeIt]} />
         </span>
       </li>
     );
@@ -51,7 +51,7 @@ export default function Calendar() {
                 <span>{ST[a.status] && <span className={'st ' + ST[a.status][0]}>{ST[a.status][1]}</span>}</span>
                 <span className="acts">
                   {a.status === 'booked' && a.date === t && <button type="button" className="btn sm primary" onClick={() => run((d) => addToQueue(d, p.id, 'Appointment', a.id))}>Check in</button>}
-                  {a.status === 'booked' && <Menu label={`More actions for ${p.name}`} items={[{ label: 'WhatsApp reminder', href: waLink(p, remind(db, p, a.date, a.reason, a.time)) }, { label: 'Reschedule', onClick: () => setUi({ book: { resched: a.id } }) }, { label: 'Cancel booking', onClick: () => cancelAppt(a.id) }]} />}
+                  {a.status === 'booked' && <Menu label={`More actions for ${p.name}`} items={[...contactItems(p, remind(db, p, a.date, a.reason, a.time)), { label: 'Reschedule', onClick: () => setUi({ book: { resched: a.id } }) }, { label: 'Cancel booking', onClick: () => cancelAppt(a.id) }]} />}
                 </span>
               </li>
             ); })}

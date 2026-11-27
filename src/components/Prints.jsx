@@ -42,11 +42,36 @@ export function RecordPrint({ db, p }) {
           <thead><tr><th style={{ width: '16%' }}>Date</th><th>Treatment Record</th><th style={{ width: '14%' }}>Payment</th><th style={{ width: '14%' }}>Balance</th></tr></thead>
           <tbody>
             {rows.map((r, i) => <tr key={i}><td>{fmtS(r.date)}</td><td>{r.text}{r.charge ? ` (${inr(r.charge)})` : ''}</td><td>{r.paid ? inr(r.paid) : ''}</td><td>{inr(r.balance)}</td></tr>)}
-            {Array.from({ length: Math.max(4, 22 - rows.length) }, (_, i) => <tr key={'e' + i}><td /><td /><td /><td /></tr>)}
+            {Array.from({ length: Math.max(4, 27 - rows.length) }, (_, i) => <tr key={'e' + i}><td /><td /><td /><td /></tr>)}
           </tbody>
         </table>
       </div>
     </>
+  );
+}
+
+// Receipt for one visit: what was charged, what was paid, what is carried forward.
+export function ReceiptPrint({ db, visit }) {
+  const p = P(db, visit.pid), paid = sum(db.payments.filter((x) => x.visitId === visit.id), (x) => x.amount), pays = db.payments.filter((x) => x.visitId === visit.id);
+  const before = sheetRows(db, p.id).find((r) => r.id === visit.id), prev = before ? before.balance - visit.total + paid : 0;
+  return (
+    <div className="pg">
+      <h1>PARI DENTAL HOSPITAL</h1>
+      <div className="addr">{db.clinic.addr}<br />Mobile: {db.clinic.phone}</div>
+      <p style={{ textAlign: 'center', fontWeight: 700, margin: '4mm 0' }}>RECEIPT</p>
+      <div className="pr"><div style={{ flex: 1 }}><span>Name</span> {p.title} {p.name}</div><div><span>Reg. No.</span> {p.reg}</div><div><span>Date</span> {fmtS(visit.date)}</div></div>
+      <table className="pt" style={{ marginTop: '4mm' }}>
+        <thead><tr><th>Treatment</th><th style={{ width: '28%' }}>Amount</th></tr></thead>
+        <tbody>
+          {visit.services.map((s, i) => <tr key={i}><td>{s.name}{s.teeth?.length ? ` (${s.teeth.join(', ')})` : ''}</td><td>{inr(s.price)}</td></tr>)}
+          <tr><td>Previous balance</td><td>{inr(prev)}</td></tr>
+          <tr><td><b>Total due</b></td><td><b>{inr(prev + visit.total)}</b></td></tr>
+          <tr><td>Received{pays.length ? ` (${pays.map((x) => x.mode).join(', ')})` : ''}</td><td>{inr(paid)}</td></tr>
+          <tr><td><b>Balance</b></td><td><b>{inr(prev + visit.total - paid)}</b></td></tr>
+        </tbody>
+      </table>
+      <p style={{ marginTop: '20mm', textAlign: 'right' }}>For {db.clinic.name}</p>
+    </div>
   );
 }
 
@@ -57,6 +82,7 @@ export function RxPrint({ db, visit }) {
       <h1>PARI DENTAL HOSPITAL</h1>
       <div className="addr">{db.clinic.addr}<br />Mobile: {db.clinic.phone}</div>
       <div className="pr"><div style={{ flex: 1 }}><span>Name</span> {p.title} {p.name}</div><div><span>Reg. No.</span> {p.reg}</div><div><span>Date</span> {fmtS(visit.date)}</div></div>
+      <div className="pr"><div style={{ flex: 1 }}><span>Age / Sex</span> {ageOf(p) ?? ''} / {p.sex}</div>{p.allergy && <div style={{ flex: 2 }}><span>Allergic to</span> <b>{p.allergy}</b></div>}</div>
       <p style={{ fontSize: '20pt', color: GREEN, margin: '6mm 0 2mm' }}>℞</p>
       <p style={{ whiteSpace: 'pre-line', fontSize: '12pt' }}>{visit.rx}</p>
       <p style={{ marginTop: '30mm', textAlign: 'right' }}>{DOCTOR}</p>
@@ -83,19 +109,19 @@ export function ReportDoc({ db, r }) {
           </tbody></table>
         </>
       )}
-      <div className="sign">{r.sig ? <img src={r.sig} alt="Signature" /> : <div style={{ height: 60 }} />}For {db.clinic.name}</div>
+      <div className="sign">{r.sig ? <img src={r.sig} alt="Signature" /> : <div style={{ height: 60 }} />}{DOCTOR}<br />For {db.clinic.name}</div>
     </div>
   );
 }
 
 export function RegisterPrint({ rows, from, to }) {
   return (
-    <div className="rpage" style={{ padding: '8mm' }}>
+    <div className="rpage wide" style={{ padding: '8mm' }}>
       <h2 style={{ font: '700 14pt Arial', margin: '0 0 4mm' }}>Pari Dental Hospital · Patient treatment register · {fmtD(from)} to {fmtD(to)}</h2>
       <table className="pt" style={{ fontSize: '8.5pt' }}>
         <thead><tr>{['Date', 'ID No.', 'Patient name', 'Age', 'Sex', 'Category', 'Treatment procedure', 'Appointment', 'In', 'Out', 'Duration', 'Remarks', 'Payment', 'Balance', 'Consulted by', 'Mobile no.'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>
-          {rows.map((r) => <tr key={r.key}><td>{fmtS(r.date)}</td><td>{r.reg}</td><td>{r.name}</td><td>{r.age}</td><td>{r.sex}</td><td>{r.cat === 'o' ? 'Ortho' : 'General'}</td><td>{r.proc}</td><td>{r.walkin ? 'Walk-in' : r.appt}</td><td>{r.inT}</td><td>{r.outT}</td><td>{r.dur != null ? r.dur + ' min' : ''}</td><td>{r.remarks}</td><td>{r.pay || ''}</td><td>{r.bal}</td><td>{r.doc}</td><td>{r.mobile}</td></tr>)}
+          {rows.map((r) => <tr key={r.key}><td>{fmtS(r.date)}</td><td>{r.reg}</td><td>{r.name}</td><td>{r.age}</td><td>{r.sex}</td><td>{r.cat === 'o' ? 'Ortho' : 'General'}</td><td>{r.proc}</td><td>{r.walkin ? 'Walk-in' : r.appt}</td><td>{r.inT}</td><td>{r.outT}</td><td>{r.dur != null ? r.dur + ' min' : ''}</td><td>{r.remarks}</td><td>{r.pay ? inr(r.pay) : ''}</td><td>{inr(r.bal)}</td><td>{r.doc}</td><td>{r.mobile}</td></tr>)}
         </tbody>
       </table>
     </div>

@@ -13,7 +13,7 @@ export const sum = (a, f) => a.reduce((s, x) => s + (+f(x) || 0), 0);
 export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export const mins = (t) => { if (!t) return null; const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 export const minsAgo = (t) => { if (!t) return 0; const d = new Date(); return Math.max(0, d.getHours() * 60 + d.getMinutes() - mins(t)); };
-export const fill = (tpl, o) => tpl.replace(/\{(\w+)\}/g, (m, k) => o[k] ?? m);
+export const fill = (tpl, o) => tpl.replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(o, k) ? o[k] : m));
 export const sortBy = (arr, sort, getters) => {
   const g = getters[sort.k] || Object.values(getters)[0];
   return [...arr].sort((a, b) => { const x = g(a), y = g(b); return (x > y ? 1 : x < y ? -1 : 0) * sort.dir; });

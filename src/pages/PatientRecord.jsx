@@ -10,13 +10,14 @@ import { inr } from '../logic/format.js';
 
 export default function PatientRecord({ id }) {
   const db = useDb(), rec = useUi().role === 'reception', p = P(db, id);
-  const [amt, setAmt] = useState(''), [mode, setMode] = useState('Cash');
+  const [amt, setAmt] = useState(null), [mode, setMode] = useState(db.clinic.lastMode || 'Cash');
   if (!p) return <Head title="Patient not found" />;
-  const b = bal(db, p.id);
+  const b = bal(db, p.id), amount = amt ?? String(b); // the balance is filled in; change it for a part payment
   return (
     <>
       <Head title={`${p.title} ${p.name}`} sub={p.cat === 'o' ? 'Orthodontics' : 'General'}>
         <button type="button" className="btn ghost" onClick={() => setUi({ print: <RecordPrint db={db} p={p} /> })}>Print</button>
+        {!rec && <button type="button" className="btn primary" onClick={() => { setUi({ repPid: p.id }); go('/reports/new'); }}>Write report</button>}
         {rec && <>
           <button type="button" className="btn ghost" onClick={() => go('/register/' + p.id)}>Edit form</button>
           <button type="button" className="btn ghost" onClick={() => setUi({ book: { pid: p.id } })}>Book</button>
@@ -30,10 +31,10 @@ export default function PatientRecord({ id }) {
         <div className="due tot"><span>Balance</span><span data-testid="balance" style={b > 0 ? { color: 'var(--bad)' } : undefined}>{inr(b)}</span></div>
         {rec && b > 0 && (
           <div className="row-actions" style={{ marginTop: 8 }}>
-            <input type="number" min="1" placeholder="₹ amount" aria-label="Amount to collect" style={{ width: 120 }} value={amt} onChange={(e) => setAmt(e.target.value)} />
+            <input type="number" min="1" placeholder="₹ amount" aria-label="Amount to collect" style={{ width: 120 }} step="1" inputMode="numeric" value={amount} onChange={(e) => setAmt(e.target.value)} />
             <select aria-label="Payment mode" style={{ width: 'auto' }} value={mode} onChange={(e) => setMode(e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option></select>
-            <button type="button" className="btn sm primary" onClick={() => { if (run((d) => payDue(d, p.id, amt, mode)).ok) setAmt(''); }}>Collect</button>
-            <a className="btn sm wa" target="_blank" rel="noopener noreferrer" href={waLink(p, dueMsg(db, p))}>Remind</a>
+            <button type="button" className="btn sm primary" onClick={() => { if (run((d) => payDue(d, p.id, amount, mode)).ok) setAmt(null); }}>Collect</button>
+            {p.mobile && <a className="btn sm wa" target="_blank" rel="noopener noreferrer" href={waLink(p, dueMsg(db, p))}>Remind</a>}
           </div>
         )}
       </div>

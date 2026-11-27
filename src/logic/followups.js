@@ -2,10 +2,14 @@ import { today, addDays } from './format.js';
 
 // A visit carries its follow-up: fu = pending (to call) → contacted (called) → booked / done (closed).
 export const openFU = (db) => db.visits.filter((v) => v.nextVisit && v.fu && v.fu !== 'done');
-export const dueFU = (db) => openFU(db).filter((v) => v.nextVisit <= today() && v.fu !== 'booked');
+// "Booked" only counts while the patient still has a booking ahead. A cancelled or missed
+// appointment puts them back on the call list instead of losing them.
+const upcoming = (db) => new Set(db.appointments.filter((a) => a.status === 'booked' && a.date >= today()).map((a) => a.pid));
+const waitingForCall = (db) => { const up = upcoming(db); return openFU(db).filter((v) => !(v.fu === 'booked' && up.has(v.pid))); };
+export const dueFU = (db) => waitingForCall(db).filter((v) => v.nextVisit <= today());
 
 export function callLists(db) {
-  const open = openFU(db).filter((v) => v.fu !== 'booked' && v.nextVisit <= addDays(today(), 7));
+  const open = waitingForCall(db).filter((v) => v.nextVisit <= addDays(today(), 7));
   return {
     toCall: open.filter((v) => v.fu !== 'contacted').sort((a, b) => a.nextVisit.localeCompare(b.nextVisit)),
     called: open.filter((v) => v.fu === 'contacted').sort((a, b) => (b.calledOn || '').localeCompare(a.calledOn || '')),

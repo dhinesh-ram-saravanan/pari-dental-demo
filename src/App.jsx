@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { Component, useEffect } from 'react';
 import Icon from './components/icons.jsx';
-import { useDb, useUi, setUi, go, useRoute } from './data/store.js';
+import { useDb, useUi, setUi, go, useRoute, resetDb } from './data/store.js';
 import { navCounts } from './data/selectors.js';
 import FrontDesk from './pages/FrontDesk.jsx';
 import Calendar from './pages/Calendar.jsx';
@@ -26,6 +26,23 @@ const NAV = {
 };
 const HOME = { reception: '/front-desk', doctor: '/doctor' };
 
+// One bad record must not blank the whole app: show a way out instead.
+class ErrorBoundary extends Component {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidUpdate(prev) { if (prev.route !== this.props.route && this.state.failed) this.setState({ failed: false }); }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="panel" role="alert" style={{ maxWidth: 520 }}>
+        <h2>This screen could not be shown</h2>
+        <p className="sm muted">Something it needs was changed or removed, possibly on the other screen. Your data is still saved.</p>
+        <div className="row-actions"><button type="button" className="btn primary" onClick={() => location.reload()}>Reload</button><button type="button" className="btn ghost" onClick={() => { if (window.confirm('Reset all demo data?')) { resetDb(); location.reload(); } }}>Reset demo data</button></div>
+      </div>
+    );
+  }
+}
+
 function page(route) {
   const [, a, b] = route.split('/');
   if (a === 'front-desk') return <FrontDesk />;
@@ -44,6 +61,8 @@ function page(route) {
 function Sidebar({ route }) {
   const db = useDb(), ui = useUi(), counts = navCounts(db);
   const inPatients = route.startsWith('/patients'), open = ui.pOpen || inPatients;
+  // on a phone the menu is a sideways strip: keep the current page in view
+  useEffect(() => { const on = document.querySelector('#nav a.on'); if (on && window.innerWidth < 900) on.scrollIntoView({ inline: 'center', block: 'nearest' }); }, [route]);
   const active = (k) => route === k || route.startsWith(k + '/') || (k === '/front-desk' && route.startsWith('/register')) || (k === '/patients/treatment' && inPatients && route !== '/patients/info');
   return (
     <aside id="side">
@@ -70,6 +89,12 @@ export default function App() {
   const kiosk = route === '/form' || route === '/tablet';
   const view = kiosk ? null : page(route);
   useEffect(() => { if (!kiosk && !view) go(HOME[ui.role]); }, [kiosk, view, ui.role]);
+  // Each screen names the tab and takes focus, so keyboard and screen-reader users know the page changed.
+  useEffect(() => {
+    const h = document.querySelector('#main h1');
+    document.title = (h ? h.textContent + ' · ' : '') + 'Pari Dental Hospital';
+    if (h && document.activeElement === document.body) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  }, [route]);
   // Print whatever was put in ui.print, then clear it.
   useEffect(() => {
     if (!ui.print) return;
@@ -80,9 +105,10 @@ export default function App() {
   }, [ui.print]);
   return (
     <>
+      {!kiosk && <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.querySelector('#main h1')?.focus(); }}>Skip to content</a>}
       <div className={'app' + (kiosk ? ' kiosk bare' : '')}>
         {kiosk ? <aside id="side" hidden /> : <Sidebar route={route} />}
-        <main id="main">{kiosk ? <Kiosk qr={route === '/form'} /> : view}{ui.qr && <QrModal />}{ui.book && <BookModal />}{ui.co && <CheckoutSheet />}</main>
+        <main id="main"><ErrorBoundary route={route}>{kiosk ? <Kiosk qr={route === '/form'} /> : view}{ui.qr && <QrModal />}{ui.book && <BookModal />}{ui.co && <CheckoutSheet />}</ErrorBoundary></main>
       </div>
       <div id="print">{ui.print}</div>
       <div className={'toast' + (ui.toast ? ' show' : '')} id="toast" role="status" aria-live="polite">{ui.toast}</div>

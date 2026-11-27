@@ -38,16 +38,18 @@ export function validateReg(r) {
   const noAge = r.age === '' || r.age == null;
   if (!r.dob && noAge && !e.dob) e.age = 'Enter age or date of birth';
   else if (!noAge && !(+r.age >= 0 && +r.age <= 120 && Number.isInteger(+r.age))) e.age = 'Age must be 0 to 120';
-  if (!MOBILE.test(r.mobile || '')) e.mobile = r.mobile ? 'Must be 10 digits starting with 6, 7, 8 or 9' : 'Enter the mobile number';
+  // Old records brought in from Excel may only have a landline, and no complaint was noted.
+  const old = !!r.id && !!r.imported;
+  if (r.mobile ? !MOBILE.test(r.mobile) : !(old && r.office)) e.mobile = r.mobile ? 'Must be 10 digits starting with 6, 7, 8 or 9' : old ? 'Enter a mobile or an office phone' : 'Enter the mobile number';
   if (r.emergNo && !MOBILE.test(r.emergNo)) e.emergNo = '10 digits';
   if (r.emergNo && !r.emergRel) e.emergRel = 'Who is this?';
   if (r.office && !/^\d{10,11}$/.test(r.office)) e.office = '10 or 11 digits';
   if (r.physPh && !/^\d{10,11}$/.test(r.physPh)) e.physPh = '10 or 11 digits';
   if (r.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(r.email)) e.email = 'Check the email';
   if (!r.address.trim() || r.address.trim().length < 6) e.address = 'Enter the address';
-  if (!r.complaint.trim()) e.complaint = 'What brings you in?';
+  if (!r.complaint.trim() && !old) e.complaint = 'What brings you in?';
   if (!r.consent) e.consent = 'Please tap “I agree”';
-  if (!r.sig && !r.id) e.sig = 'Please sign';
+  if (!r.sig && !r.id && !r.paperSig) e.sig = 'Please sign';
   if (r.forOther) { if (!r.oName.trim()) e.oName = 'Your name'; if (!r.oRel.trim()) e.oRel = 'Relationship'; }
   return e;
 }
@@ -60,10 +62,11 @@ export const allocReg = (db) => db.nextReg++;
 
 // Creates or updates a patient from the form. Returns the patient.
 export function savePatient(db, r, { verified = true } = {}) {
-  const data = { title: r.title, name: r.name.trim(), sex: r.sex, age: r.age === '' || r.age == null ? null : +r.age, dob: r.dob, address: r.address, mobile: r.mobile, emerg: r.emergNo ? r.emergNo + (r.emergRel ? ' · ' + r.emergRel : '') : '', email: r.email, prof: r.prof, office: r.office, ref: r.ref, phys: r.phys, physPh: r.physPh, med: [...r.med], other: r.other, preg: r.sex === 'F' && r.preg, nurse: r.sex === 'F' && r.nurse, allergy: r.allergy, complaint: r.complaint, cat: r.cat, sig: !!r.sig, sigData: r.sigData || null, forOther: r.forOther ? { name: r.oName, rel: r.oRel } : null };
+  const data = { title: r.title, name: r.name.trim(), sex: r.sex, age: r.age === '' || r.age == null ? null : +r.age, dob: r.dob, address: r.address, mobile: r.mobile, emerg: r.emergNo ? r.emergNo + (r.emergRel ? ' · ' + r.emergRel : '') : '', email: r.email, prof: r.prof, office: r.office, ref: r.ref, phys: r.phys, physPh: r.physPh, med: [...r.med], other: r.other, preg: r.sex === 'F' && r.preg, nurse: r.sex === 'F' && r.nurse, allergy: r.allergy, complaint: r.complaint, cat: r.cat, sig: !!r.sig || !!r.paperSig, sigData: r.sigData || null, forOther: r.forOther ? { name: r.oName, rel: r.oRel } : null };
   if (r.id) { const p = db.patients.find((x) => x.id === r.id); Object.assign(p, data, { verified: true }); return p; }
   const dup = db.patients.find((p) => p.mobile === data.mobile && p.name.toLowerCase() === data.name.toLowerCase());
-  if (dup) return dup;
+  // Same person filling the form again: take the new answers (a patient-filled form goes back to "to check").
+  if (dup) { Object.assign(dup, data, { verified }); return dup; }
   const p = { id: 'p' + uid(), reg: allocReg(db), created: today(), ...data, verified };
   db.patients.push(p);
   return p;

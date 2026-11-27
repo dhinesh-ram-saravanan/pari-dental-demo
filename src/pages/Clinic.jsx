@@ -3,7 +3,7 @@ import { Segmented, Switch } from '../components/controls.jsx';
 import { Head } from '../components/PatientBits.jsx';
 import { TeamTable } from './Team.jsx';
 import { useDb, update, run, toast, resetDb, setUi, go } from '../data/store.js';
-import { P, pendingAppr } from '../data/selectors.js';
+import { P, pendingAppr, remind } from '../data/selectors.js';
 import { decideApproval } from '../data/actions.js';
 import { today, fmtD, fmtS, inr, sum, uid } from '../logic/format.js';
 import { MARKS, EXP_CATS } from '../data/constants.js';
@@ -11,15 +11,15 @@ import { MARKS, EXP_CATS } from '../data/constants.js';
 function Prices({ db }) {
   const [f, setF] = useState({ name: '', price: '', cat: 'g' });
   const edit = (id, patch, msg) => { update((d) => Object.assign(d.services.find((s) => s.id === id), patch)); if (msg) toast(msg); };
-  const add = (e) => { e.preventDefault(); const name = f.name.trim(); if (!name || f.price === '') return toast('Enter the service name and price'); update((d) => d.services.push({ id: 's' + uid(), cat: f.cat, name, price: +f.price, marks: '', note: '', active: true })); toast('Service added'); setF({ name: '', price: '', cat: f.cat }); };
+  const add = (e) => { e.preventDefault(); const name = f.name.trim(); if (!name || f.price === '') return toast('Enter the service name and price'); if (db.services.some((s) => s.name.toLowerCase() === name.toLowerCase())) return toast(`“${name}” is already in the list`); update((d) => d.services.push({ id: 's' + uid(), cat: f.cat, name, price: +f.price, marks: '', note: '', active: true })); toast('Service added'); setF({ name: '', price: '', cat: f.cat }); };
   return (
     <>
       {['g', 'o'].map((c) => (
         <div key={c}><div className="sec">{c === 'g' ? 'General' : 'Orthodontics'}</div>
           <div className="list">{db.services.filter((s) => s.cat === c).map((s) => (
-            <div className="li" key={s.id} style={{ gridTemplateColumns: 'minmax(0,1fr) 120px 150px 44px' }}>
+            <div className="li price" key={s.id}>
               <div>{s.name}{s.byDoctor && <span className="badge pri"> added in treatment</span>}</div>
-              <input type="number" min="0" defaultValue={s.price} key={s.price} aria-label={`Price of ${s.name}`} onBlur={(e) => { if (+e.target.value !== s.price) edit(s.id, { price: +e.target.value || 0 }, 'Price saved'); }} />
+              <input type="number" min="0" defaultValue={s.price} key={s.price} aria-label={`Price of ${s.name}`} onBlur={(e) => { if (e.target.value === '' || !(+e.target.value >= 0)) { e.target.value = s.price; return; } if (+e.target.value !== s.price) edit(s.id, { price: +e.target.value }, 'Price saved'); }} />
               <select aria-label={`${s.name} marks tooth as`} value={s.marks} onChange={(e) => edit(s.id, { marks: e.target.value })}><option value="">No chart mark</option>{Object.entries(MARKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
               <Switch on={s.active} label={`${s.name} is offered`} onChange={(v) => edit(s.id, { active: v }, s.name + (v ? ' is offered' : ' is hidden from the list'))} />
             </div>
@@ -55,35 +55,48 @@ function Approvals({ db }) {
 }
 
 function Expenses({ db }) {
-  const blank = { date: today(), category: EXP_CATS[0], item: '', amount: '', vendor: '' };
-  const [f, setF] = useState(blank), set = (k, v) => setF({ ...f, [k]: v });
+  const [f, setF] = useState({ date: today(), category: EXP_CATS[0], item: '', amount: '', vendor: '' }), set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  // Typing an item entered before fills in its category, vendor and last amount.
+  const past = (name) => [...db.expenses].reverse().find((e) => e.item.toLowerCase() === name.trim().toLowerCase());
+  const setItem = (v) => { const e = past(v); setF((x) => ({ ...x, item: v, ...(e ? { category: e.category, vendor: e.vendor || x.vendor, amount: x.amount || String(e.amount) } : {}) })); };
+  const del = (e) => { if (window.confirm(`Delete “${e.item}” (${inr(e.amount)})?`)) { update((d) => { d.expenses = d.expenses.filter((x) => x.id !== e.id); }); toast('Expense deleted'); } };
+  const uniq = (k) => [...new Set(db.expenses.map((e) => e[k]).filter(Boolean))];
   const ex = db.expenses.filter((e) => e.date.startsWith(today().slice(0, 7))).sort((a, b) => b.date.localeCompare(a.date));
-  const add = (e) => { e.preventDefault(); if (!f.item.trim() || !(+f.amount > 0)) return toast('Enter the item and an amount above 0'); update((d) => d.expenses.push({ id: uid(), ...f, item: f.item.trim(), amount: +f.amount })); toast('Expense added'); setF(blank); };
+  const add = (e) => { e.preventDefault(); if (!f.item.trim() || !(+f.amount > 0)) return toast('Enter the item and an amount above 0'); update((d) => d.expenses.push({ id: uid(), ...f, item: f.item.trim(), amount: +f.amount })); toast('Expense added'); setF({ ...f, item: '', amount: '', vendor: '' }); }; // date and category stay for the next entry
   return (
     <>
       <form className="bar" onSubmit={add}>
         <input type="date" aria-label="Date" style={{ flex: '0 0 auto', width: 'auto', minWidth: 0 }} value={f.date} max={today()} onChange={(e) => set('date', e.target.value)} />
         <select style={{ width: 'auto' }} aria-label="Category" value={f.category} onChange={(e) => set('category', e.target.value)}>{EXP_CATS.map((c) => <option key={c}>{c}</option>)}</select>
-        <input placeholder="Item" aria-label="Item" value={f.item} onChange={(e) => set('item', e.target.value)} />
+        <input placeholder="Item" aria-label="Item" list="dl-exp-item" value={f.item} onChange={(e) => setItem(e.target.value)} />
+        <input placeholder="Vendor (optional)" aria-label="Vendor" list="dl-exp-vendor" value={f.vendor} onChange={(e) => set('vendor', e.target.value)} />
+        <datalist id="dl-exp-item">{uniq('item').map((x) => <option key={x} value={x} />)}</datalist><datalist id="dl-exp-vendor">{[...new Set([...uniq('vendor'), ...db.inventory.flatMap((i) => i.batches.map((b) => b.vendor)).filter(Boolean)])].map((x) => <option key={x} value={x} />)}</datalist>
         <input type="number" min="1" placeholder="₹" aria-label="Amount" style={{ flex: '0 0 110px', minWidth: 0 }} value={f.amount} onChange={(e) => set('amount', e.target.value)} />
         <button className="btn primary">Add</button>
       </form>
       <div className="sec">This month · {inr(sum(ex, (e) => e.amount))}</div>
-      <div className="list">{ex.map((e) => <div className="li" key={e.id}><div className="when">{fmtS(e.date).slice(0, 5)}</div><div><b>{e.item}</b><div className="what">{e.category}{e.vendor ? ' · ' + e.vendor : ''}</div></div><span>{inr(e.amount)}</span></div>)}</div>
+      <div className="list">{ex.map((e) => <div className="li" key={e.id}><div className="when">{fmtS(e.date).slice(0, 5)}</div><div><b>{e.item}</b><div className="what">{e.category}{e.vendor ? ' · ' + e.vendor : ''}</div></div><span className="row-actions">{inr(e.amount)}<button type="button" className="icon" aria-label={`Delete ${e.item}`} onClick={() => del(e)}>×</button></span></div>)}</div>
     </>
   );
 }
 
 function Settings({ db }) {
-  const [f, setF] = useState({ name: db.clinic.name, phone: db.clinic.phone, template: db.clinic.template });
+  const [f, setF] = useState({ name: db.clinic.name, phone: db.clinic.phone, addr: db.clinic.addr, email: db.clinic.email, template: db.clinic.template });
+  const sample = db.patients[0], unknown = (f.template.match(/\{\w+\}/g) || []).filter((t) => !['{name}', '{clinic}', '{reason}', '{date}', '{phone}'].includes(t));
   return (
+    <>
     <form onSubmit={(e) => { e.preventDefault(); update((d) => Object.assign(d.clinic, f)); toast('Saved'); }}>
-      <div className="fgrid"><label>Clinic name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label><label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label></div>
+      <div className="fgrid"><label>Clinic name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label><label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+        <label>Address (printed on forms)<input value={f.addr} onChange={(e) => setF({ ...f, addr: e.target.value })} /></label><label>Email<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label></div>
       <label>Reminder message<textarea rows="3" value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })} /></label>
       <p className="sm muted">Use {'{name}'}, {'{clinic}'}, {'{reason}'}, {'{date}'} and {'{phone}'}.</p>
-      <button className="btn primary">Save</button>{' '}
-      <button type="button" className="btn ghost" onClick={() => { if (window.confirm('Reset all demo data?')) { resetDb(); setUi({ doc: null, co: null }); toast('Demo data reset'); go('/doctor'); } }}>Reset demo data</button>
+      {unknown.length > 0 && <p className="warnline">{unknown.join(', ')} will not be filled in. Check the spelling.</p>}
+      <p className="sm" style={{ background: 'var(--sunk)', padding: '10px 12px', borderRadius: 10 }}><span className="muted">Preview: </span>{remind({ clinic: f }, sample, today(), 'Review', '10:30')}</p>
+      <button className="btn primary">Save</button>
     </form>
+    <div className="danger"><p className="sm muted" style={{ margin: '0 0 8px' }}>Demo only: puts back the sample clinic and removes everything entered.</p>
+      <button type="button" className="btn ghost" onClick={() => { if (window.confirm('Reset all demo data?')) { resetDb(); setUi({ doc: null, co: null }); toast('Demo data reset'); go('/doctor'); } }}>Reset demo data</button></div>
+    </>
   );
 }
 

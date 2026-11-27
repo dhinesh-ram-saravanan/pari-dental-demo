@@ -2,9 +2,13 @@
 import { today, nowT, fmtD, addDays, sum, uid, inr } from '../logic/format.js';
 import { bal, priceApprovals } from '../logic/balance.js';
 import { markBooked } from '../logic/followups.js';
-import { emptyP, allocReg } from '../logic/validation.js';
-import { P, SV, svByName, tq, curQ } from './selectors.js';
-import { DOCTOR } from './constants.js';
+import { emptyP, allocReg, validateBooking } from '../logic/validation.js';
+import { P, SV, svByName, tq, curQ, SLOT_TAKEN } from './selectors.js';
+import { DOCTOR, SLOTS } from './constants.js';
+
+const GONE = { ok: false, msg: 'That was changed on another screen. Please check and try again.' };
+// First slot nobody has on that day (and, for today, that has not passed).
+export const firstFree = (db, date) => { const taken = SLOT_TAKEN(db, date); return SLOTS.find((s) => !taken.has(s) && (date !== today() || s > nowT())) || SLOTS[0]; };
 
 export function addToQueue(db, pid, source, apptId) {
   const t = today(), p = P(db, pid);
@@ -18,6 +22,8 @@ export function addToQueue(db, pid, source, apptId) {
 
 export function bookAppt(db, pid, date, time, reason) {
   if (db.appointments.some((a) => a.date === date && a.time === time && a.status === 'booked')) return { ok: false, msg: `${time} on ${fmtD(date)} is already booked` };
+  const same = db.appointments.find((a) => a.pid === pid && a.date === date && a.status === 'booked');
+  if (same) return { ok: false, msg: `${P(db, pid).name} is already booked at ${same.time} that day. Reschedule that booking instead.` };
   db.appointments.push({ id: 'a' + uid(), pid, date, time, reason, status: 'booked' });
   markBooked(db, pid);
   return { ok: true, msg: `Booked ${P(db, pid).name} at ${time} on ${fmtD(date)}` };
@@ -27,6 +33,7 @@ export function bookAppt(db, pid, date, time, reason) {
 export function submitBooking(db, f, reschedId) {
   if (reschedId) {
     const old = db.appointments.find((a) => a.id === reschedId);
+    if (!old || old.status !== 'booked') return GONE;
     old.status = 'cancelled';
     const r = bookAppt(db, old.pid, f.date, f.time, f.reason);
     if (!r.ok) { old.status = 'booked'; return r; }
@@ -35,7 +42,8 @@ export function submitBooking(db, f, reschedId) {
   let pid = f.pid;
   if (pid === 'new') {
     if (db.appointments.some((a) => a.date === f.date && a.time === f.time && a.status === 'booked')) return { ok: false, msg: `${f.time} on ${fmtD(f.date)} is already booked` };
-    let p = db.patients.find((x) => x.mobile === f.newPhone);
+    // families share a mobile: only the same name on the same number is the same person
+    let p = db.patients.find((x) => x.mobile === f.newPhone && x.name.toLowerCase() === f.newName.trim().toLowerCase());
     if (!p) { p = { ...emptyP(), id: 'p' + uid(), reg: allocReg(db), created: today(), name: f.newName.trim(), mobile: f.newPhone, emerg: '', sig: false, verified: false, forOther: null }; delete p.consent; db.patients.push(p); }
     pid = p.id;
   }
@@ -47,6 +55,7 @@ export function sendIn(db, qid) {
   const cur = curQ(db);
   if (cur) return { ok: false, msg: `The doctor is still with ${P(db, cur.pid).name}. Wait for the hand-over.` };
   const q = db.queue.find((x) => x.id === qid);
+  if (!q || q.status !== 'waiting') return GONE;
   q.status = 'in'; q.inTime = nowT();
   return { ok: true, msg: `${P(db, q.pid).name} sent in to the doctor` };
 }
@@ -57,8 +66,8 @@ export function handOver(db, d) {
   if (!q) return { ok: false, msg: 'No patient is in the chair' };
   if (!recs.length) return { ok: false, msg: 'Choose at least one treatment done today' };
   for (const r of recs) {
-    const bad = r.teeth.split(/[ ,]+/).filter(Boolean).find((n) => !/^[1-4][1-8]$/.test(n));
-    if (bad) return { ok: false, msg: `“${bad}” is not a tooth number. Use 11–18, 21–28, 31–38, 41–48.` };
+    const bad = r.teeth.split(/[ ,]+/).filter(Boolean).find((n) => !/^([1-4][1-8]|[5-8][1-5])$/.test(n)); // adult and milk teeth
+    if (bad) return { ok: false, msg: `“${bad}” is not a tooth number. Use 11–48, or 51–85 for milk teeth.` };
     if (r.price !== '' && !(+r.price >= 0)) return { ok: false, msg: `Check the price for ${r.name}` };
   }
   const p0 = P(db, d.pid);
@@ -70,7 +79,8 @@ export function handOver(db, d) {
     // a typed "Other" treatment is saved as a service for next time
     if (!s) { s = { id: 's' + uid(), cat: c.cat || p0.cat, name: r.name.trim(), price: +r.price || 0, marks: '', note: '', active: true, byDoctor: true }; db.services.push(s); }
     const teeth = r.teeth.split(/[ ,]+/).filter(Boolean), price = r.price === '' ? null : +r.price;
-    let it = r.planItemId && c.items.find((x) => x.id === r.planItemId);
+    // a planned item picked from the dropdown (not the "Still planned" link) still ticks the plan
+    let it = (r.planItemId && c.items.find((x) => x.id === r.planItemId)) || c.items.find((x) => !x.done && x.name === s.name && (!teeth.length || !x.teeth.length || x.teeth.join() === teeth.join()));
     if (!it) { it = { id: uid(), name: s.name, svcId: s.id, teeth, price: price ?? s.price, done: false }; c.items.push(it); }
     Object.assign(it, { name: s.name, svcId: s.id, teeth, done: true, doneDate: today() });
     if (price !== null) it.price = price;
@@ -80,7 +90,7 @@ export function handOver(db, d) {
   if (d.close == null ? c.items.every((x) => x.done) : d.close) c.status = 'closed';
   db.visits.filter((y) => y.pid === d.pid && y.fu && y.fu !== 'done').forEach((y) => { y.fu = 'done'; });
   q.outTime = nowT();
-  const vis = { id: 'v' + uid(), pid: d.pid, caseId: c.id, date: today(), services: done, notes: '', rx: d.rx || '', total: sum(done, (x) => x.price || 0), handled: DOCTOR, nextVisit: null, nextReason: d.nextIn ? d.nextReason : '', suggest: d.nextIn, fu: null, stage: 'checkout', inTime: q.inTime, outTime: q.outTime, remarks: d.remarks || q.remarks || '' };
+  const vis = { id: 'v' + uid(), pid: d.pid, caseId: c.id, date: today(), services: done, notes: d.notes || '', rx: d.rx || '', total: sum(done, (x) => x.price || 0), handled: DOCTOR, nextVisit: null, nextReason: d.nextIn ? d.nextReason : '', suggest: d.nextIn, fu: null, stage: 'checkout', inTime: q.inTime, outTime: q.outTime, remarks: d.remarks || q.remarks || '' };
   db.visits.push(vis);
   q.status = 'checkout'; q.visitId = vis.id;
   const ap = db.appointments.find((x) => x.pid === d.pid && x.date === today() && x.status === 'checked-in');
@@ -90,16 +100,21 @@ export function handOver(db, d) {
 
 export function coInit(db, qid) {
   const x = db.queue.find((y) => y.id === qid), v = db.visits.find((y) => y.id === x.visitId);
-  return { qid, lines: v.services.map((s) => ({ ...s })), paid: '', mode: 'UPI', handled: DOCTOR, nextMode: v.suggest ? 'book' : 'none', date: addDays(today(), +(v.suggest || 7)), time: '11:00', reason: v.nextReason || '' };
+  const date = addDays(today(), +(v.suggest || 7));
+  return { qid, lines: v.services.map((s) => ({ ...s })), paid: '', mode: db.clinic.lastMode || 'UPI', handled: DOCTOR, nextMode: v.suggest ? 'book' : 'none', date, time: firstFree(db, date), reason: v.nextReason || '' };
 }
 
 export function checkout(db, co) {
-  const x = db.queue.find((y) => y.id === co.qid), v = db.visits.find((y) => y.id === x.visitId), p = P(db, x.pid), paid = +co.paid || 0;
+  const x = db.queue.find((y) => y.id === co.qid), v = x && db.visits.find((y) => y.id === x.visitId);
+  if (!v || x.status !== 'checkout') return GONE;
+  const p = P(db, x.pid), paid = +co.paid || 0;
+  if (!Number.isInteger(paid) || co.lines.some((l) => l.price !== null && !Number.isInteger(l.price))) return { ok: false, msg: 'Use whole rupees, without paise' };
   if (co.lines.some((l) => l.price === null)) return { ok: false, msg: 'Enter the price for every treatment' };
   if (co.lines.some((l) => !(l.price >= 0))) return { ok: false, msg: 'A price cannot be less than 0' };
   if (co.paid !== '' && !(paid >= 0)) return { ok: false, msg: 'The amount received cannot be less than 0' };
   if (co.paid === '') return { ok: false, msg: 'Enter the amount received (0 if nothing today)' };
   if (co.nextMode !== 'none' && (!co.date || co.date < today())) return { ok: false, msg: 'Choose today or a later date for the next visit' };
+  if (co.nextMode === 'book' && validateBooking({ date: co.date, time: co.time }).d) return { ok: false, msg: 'That time has already passed. Choose a later slot.' };
   if (co.nextMode === 'book') { const r = bookAppt(db, p.id, co.date, co.time, co.reason); if (!r.ok) return r; }
   priceApprovals(db, co.lines, p.id, today()).forEach((a) => db.approvals.push({ id: uid(), ...a }));
   Object.assign(v, { services: co.lines, total: sum(co.lines, (l) => l.price), handled: co.handled, stage: 'closed' });
@@ -107,17 +122,43 @@ export function checkout(db, co) {
   if (co.nextMode === 'none') Object.assign(v, { nextVisit: null, fu: null });
   else Object.assign(v, { nextVisit: co.date, nextReason: co.reason, fu: co.nextMode === 'book' ? 'booked' : 'pending' });
   x.status = 'done';
+  db.clinic.lastMode = co.mode;
   return { ok: true, msg: `Saved · ${p.name} balance ${inr(bal(db, p.id))}` };
 }
 
 export function payDue(db, pid, amount, mode) {
-  if (!(+amount > 0)) return { ok: false, msg: 'Enter an amount' };
+  if (!(+amount > 0) || !Number.isInteger(+amount)) return { ok: false, msg: 'Enter an amount in whole rupees' };
+  if (+amount > bal(db, pid)) return { ok: false, msg: `That is more than the balance of ${inr(bal(db, pid))}` };
   db.payments.push({ id: uid(), pid, visitId: null, date: today(), amount: +amount, mode });
   return { ok: true, msg: `${inr(+amount)} collected from ${P(db, pid).name}` };
 }
 
+// A waiting patient who left, or was added by mistake.
+export function removeFromQueue(db, qid) {
+  const q = db.queue.find((x) => x.id === qid);
+  if (!q || q.status !== 'waiting') return GONE;
+  db.queue = db.queue.filter((x) => x.id !== qid);
+  const ap = db.appointments.find((a) => a.pid === q.pid && a.date === q.date && a.status === 'checked-in');
+  if (ap) ap.status = 'booked';
+  return { ok: true, msg: `${P(db, q.pid).name} removed from today’s queue` };
+}
+// Sent in by mistake: back to the waiting list.
+export function backToWaiting(db, qid) {
+  const q = db.queue.find((x) => x.id === qid);
+  if (!q || q.status !== 'in') return GONE;
+  q.status = 'waiting'; delete q.inTime;
+  return { ok: true, msg: `${P(db, q.pid).name} moved back to waiting` };
+}
+export function cancelBooking(db, id) {
+  const a = db.appointments.find((x) => x.id === id);
+  if (!a || a.status !== 'booked') return GONE;
+  a.status = 'cancelled';
+  return { ok: true, msg: `Booking cancelled · ${P(db, a.pid).name}, ${a.time} on ${fmtD(a.date)}` };
+}
+
 export function decideApproval(db, id, approve) {
   const ap = db.approvals.find((x) => x.id === id);
+  if (!ap || ap.status !== 'pending') return GONE;
   ap.status = approve ? 'approved' : 'kept';
   if (approve) SV(db, ap.svcId).price = ap.price;
   return { ok: true, msg: approve ? `${ap.name} is now ${inr(ap.price)}` : `${ap.name} stays at ${inr(ap.old)}` };

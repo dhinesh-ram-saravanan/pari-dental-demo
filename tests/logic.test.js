@@ -10,8 +10,8 @@ import { xlDate, parseSheet, importCounts, applyImport, exportRows } from '../sr
 import { callLists, markCalled, moveBack, closeFU, dueFU } from '../src/logic/followups.js';
 import { invStatus, invQty, useStock as takeStock, stockIn } from '../src/logic/inventory.js';
 import { kpiNumbers, kpis } from '../src/logic/kpi.js';
-import { addToQueue, bookAppt, sendIn, handOver, coInit, checkout, payDue, decideApproval } from '../src/data/actions.js';
-import { curQ, tq, nextWaiting } from '../src/data/selectors.js';
+import { addToQueue, bookAppt, submitBooking, sendIn, handOver, coInit, checkout, payDue, decideApproval, cancelBooking, removeFromQueue, backToWaiting, firstFree } from '../src/data/actions.js';
+import { curQ, tq, nextWaiting, registerRows, findPatients } from '../src/data/selectors.js';
 
 let db;
 beforeEach(() => { db = seed(); });
@@ -230,6 +230,98 @@ describe('follow-ups', () => {
   it('double bookings are blocked', () => {
     expect(bookAppt(db, 'p5', addDays(t, 20), '09:00', '').ok).toBe(true);
     expect(bookAppt(db, 'p6', addDays(t, 20), '09:00', '').ok).toBe(false);
+  });
+});
+
+describe('audit fixes', () => {
+  it('a cancelled booking puts the patient back on the call list', () => {
+    const v = callLists(db).toCall.find((x) => !db.appointments.some((a) => a.pid === x.pid && a.status === 'booked'));
+    bookAppt(db, v.pid, addDays(t, 20), '09:00', 'Review');
+    expect(callLists(db).toCall.includes(v)).toBe(false);
+    expect(cancelBooking(db, db.appointments.at(-1).id).ok).toBe(true);
+    expect(callLists(db).toCall.includes(v)).toBe(true);
+    expect(cancelBooking(db, db.appointments.at(-1).id).ok).toBe(false); // already cancelled
+  });
+  it('a new caller with a family member’s mobile becomes a new patient, not the relative', () => {
+    const rel = db.patients[5], n = db.patients.length;
+    const r = submitBooking(db, { pid: 'new', newName: 'Totally Different', newPhone: rel.mobile, date: addDays(t, 30), time: '09:00', reason: '' });
+    expect(r.msg).toMatch(/Booked Totally Different/);
+    expect(db.patients.length).toBe(n + 1);
+    expect(submitBooking(db, { pid: 'new', newName: rel.name, newPhone: rel.mobile, date: addDays(t, 31), time: '09:00', reason: '' }).msg).toContain(rel.name);
+    expect(db.patients.length).toBe(n + 1);
+  });
+  it('the same patient cannot be booked twice on one day', () => {
+    expect(bookAppt(db, 'p5', addDays(t, 40), '09:00', '').ok).toBe(true);
+    expect(bookAppt(db, 'p5', addDays(t, 40), '10:00', '').msg).toMatch(/already booked at 09:00/);
+  });
+  it('offers the first free slot', () => {
+    const day = addDays(t, 50);
+    expect(firstFree(db, day)).toBe('09:00');
+    bookAppt(db, 'p5', day, '09:00', ''); bookAppt(db, 'p6', day, '09:30', '');
+    expect(firstFree(db, day)).toBe('10:00');
+    expect(coInit(db, tq(db).find((q) => q.status === 'checkout').id).time).toBe(firstFree(db, addDays(t, 7)));
+  });
+  it('a re-submitted form updates the record and goes back to "to check"', () => {
+    const a = savePatient(db, valid()), again = savePatient(db, { ...valid(), allergy: 'Latex', med: ['Diabetes'] }, { verified: false });
+    expect(again.id).toBe(a.id);
+    expect(again).toMatchObject({ allergy: 'Latex', med: ['Diabetes'], verified: false });
+  });
+  it('old imported records can be edited without a mobile or complaint', () => {
+    const old = { ...valid(), id: 'x', imported: true, mobile: '', complaint: '', office: '04422223333', sig: false };
+    expect(validateReg(old)).toEqual({});
+    expect(validateReg({ ...old, office: '' }).mobile).toBeTruthy();
+    expect(validateReg({ ...valid(), sig: false, paperSig: true })).toEqual({}); // signed on paper at the desk
+  });
+  it('import rejects duplicate, out-of-range and mismatched Reg Nos and impossible dates', () => {
+    const rows = parseSheet([[9001, '', 'A B'], [9001, '', 'C D'], ['99999999999999999999', '', 'Big'], [0, '', 'Zero'], [6003, '', 'Wrong Person'], [6003.0, '', 'Meena Krishnan']], db.patients);
+    expect(rows.map((r) => r.issues.length > 0)).toEqual([false, true, true, true, true, true]);
+    expect(rows[4].issues[0]).toMatch(/already belongs to Meena Krishnan/);
+    expect(xlDate('05/13/2020')).toBe('');
+    expect(xlDate('2024-13-45')).toBe('');
+    expect(xlDate('29/02/2024')).toBe('2024-02-29');
+  });
+  it('a new plan with a next visit stays open; the patient in the chair can be moved back', () => {
+    const cur = curQ(db);
+    expect(backToWaiting(db, cur.id).ok).toBe(true);
+    expect(curQ(db)).toBeUndefined();
+    expect(removeFromQueue(db, cur.id).ok).toBe(true);
+    expect(tq(db).some((q) => q.id === cur.id)).toBe(false);
+    const next = nextWaiting(db); sendIn(db, next.id);
+    handOver(db, { pid: next.pid, caseId: 'new', recs: [{ svcId: '', name: 'RCT – molar', teeth: '36', price: '' }], nextIn: '7', nextReason: 'PFM crown', close: false, notes: 'Access opening done.' });
+    expect(db.cases.at(-1).status).toBe('open');
+    expect(db.visits.at(-1).notes).toBe('Access opening done.');
+  });
+  it('choosing a planned treatment from the list ticks the plan instead of duplicating it', () => {
+    const cur = curQ(db), c = db.cases.find((x) => x.pid === cur.pid && x.title === 'Sensitivity – 25'), n = c.items.length;
+    handOver(db, { pid: cur.pid, caseId: c.id, recs: [{ svcId: '', name: 'Composite filling', teeth: '25', price: '1200', planItemId: null }], close: false });
+    expect(c.items.length).toBe(n);
+    expect(c.items.find((x) => x.name === 'Composite filling').done).toBe(true);
+  });
+  it('milk teeth are accepted', () => {
+    const cur = curQ(db);
+    expect(handOver(db, { pid: cur.pid, caseId: 'new', recs: [{ svcId: '', name: 'Pulpectomy (child)', teeth: '54, 85', price: '' }], close: true }).ok).toBe(true);
+  });
+  it('collecting more than the balance is refused', () => {
+    const owes = db.patients.find((p) => bal(db, p.id) > 0);
+    expect(payDue(db, owes.id, bal(db, owes.id) + 1, 'Cash').ok).toBe(false);
+    expect(payDue(db, owes.id, 10.5, 'Cash').ok).toBe(false);
+  });
+  it('a second visit on the same day does not double the day’s collection', () => {
+    const before = registerRows(db, t).reduce((s, r) => s + r.pay, 0);
+    addToQueue(db, 'p16', 'Walk-in'); // already finished and paid today
+    const rows = registerRows(db, t);
+    expect(rows.reduce((s, r) => s + r.pay, 0)).toBe(before);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+    expect(rows.at(-1).planned || rows.filter((r) => r.pid === 'p16').some((r) => r.planned)).toBe(true);
+  });
+  it('search ignores spaces, +91 and a leading 0 in mobile numbers', () => {
+    const p = db.patients.find((x) => x.id === 'pnew');
+    for (const q of ['98845 61200', '+919884561200', '09884561200', 'saranya', '6039']) expect(findPatients(db, q).some((x) => x.id === p.id)).toBe(true);
+    expect(findPatients(db, 'x')).toEqual([]);
+  });
+  it('nothing in the sample clinic is dated in the future', () => {
+    expect(db.visits.filter((v) => v.date > t)).toEqual([]);
+    expect(db.payments.filter((x) => x.date > t)).toEqual([]);
   });
 });
 

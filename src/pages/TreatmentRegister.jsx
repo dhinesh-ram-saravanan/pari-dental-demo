@@ -4,7 +4,7 @@ import { Head } from '../components/PatientBits.jsx';
 import { RegisterPrint } from '../components/Prints.jsx';
 import { useDb, useUi, setUi, update, toast } from '../data/store.js';
 import { registerRange } from '../data/selectors.js';
-import { today, fmtS, inr, sum, sortBy } from '../logic/format.js';
+import { today, addDays, fmtS, inr, sum, sortBy } from '../logic/format.js';
 
 const SORT = { date: (r) => r.date + (r.inT || r.appt || '99'), reg: (r) => r.reg, name: (r) => r.name.toLowerCase(), age: (r) => +r.age || 0, sex: (r) => r.sex, cat: (r) => r.cat, proc: (r) => r.proc.toLowerCase(), appt: (r) => r.appt || '99', in: (r) => r.inT || '99', out: (r) => r.outT || '99', dur: (r) => r.dur ?? 9999, remarks: (r) => r.remarks.toLowerCase(), pay: (r) => r.pay, bal: (r) => r.bal, doc: (r) => r.doc, mobile: (r) => r.mobile };
 const COLS = [['date', 'Date'], ['reg', 'ID No.'], ['name', 'Patient name'], ['age', 'Age', 'num'], ['sex', 'Sex'], ['cat', 'Category'], ['proc', 'Treatment procedure'], ['appt', 'Appointment'], ['in', 'In'], ['out', 'Out'], ['dur', 'Duration', 'num'], ['remarks', 'Remarks'], ['pay', 'Payment', 'num'], ['bal', 'Balance', 'num'], ['doc', 'Consulted by'], ['mobile', 'Mobile no.']];
@@ -18,6 +18,8 @@ export default function TreatmentRegister() {
   const rows = sortBy(registerRange(db, f.from, f.to).filter((r) =>
     (!s || r.name.toLowerCase().includes(s) || String(r.reg).includes(s) || r.mobile.includes(s) || r.proc.toLowerCase().includes(s) || r.doc.toLowerCase().includes(s)) &&
     (f.cat === 'all' || r.cat === f.cat) && (f.pay === 'all' || (f.pay === 'owes' ? r.owes > 0 : r.owes <= 0))), sort, SORT);
+  const t = today(), wk = addDays(t, -((new Date().getDay() + 6) % 7));
+  const RANGES = [['Today', t, t], ['Yesterday', addDays(t, -1), addDays(t, -1)], ['This week', wk, t], ['This month', t.slice(0, 8) + '01', t]];
   const saveRemark = (ref, v) => { const [k, id] = ref.split(':'); update((d) => { (k === 'v' ? d.visits : d.queue).find((x) => x.id === id).remarks = v; }); toast('Remark saved'); };
   return (
     <>
@@ -25,6 +27,7 @@ export default function TreatmentRegister() {
       <div className="filters">
         <label>From<input type="date" value={f.from} onChange={(e) => set({ from: e.target.value, to: f.to < e.target.value ? e.target.value : f.to })} /></label>
         <label>To<input type="date" value={f.to} onChange={(e) => set({ to: e.target.value })} /></label>
+        <div className="quickr" role="group" aria-label="Quick date ranges">{RANGES.map(([l, a, b]) => <button type="button" key={l} className={'chip' + (f.from === a && f.to === b ? ' on' : '')} aria-pressed={f.from === a && f.to === b} onClick={() => set({ from: a, to: b })}>{l}</button>)}</div>
         <label>Category<select value={f.cat} onChange={(e) => set({ cat: e.target.value })}><option value="all">All</option><option value="g">General</option><option value="o">Orthodontics</option></select></label>
         <label>Payment<select value={f.pay} onChange={(e) => set({ pay: e.target.value })}><option value="all">All</option><option value="owes">Owes money</option><option value="paid">Fully paid</option></select></label>
         <label className="grow">Search<input type="search" value={f.q} onChange={(e) => set({ q: e.target.value })} placeholder="Name, Reg. No., mobile, treatment or doctor" /></label>
@@ -37,7 +40,7 @@ export default function TreatmentRegister() {
         <table className="tbl reg">
           <thead><tr>{COLS.map(([k, l, cls]) => <th key={k} className={cls}><SortHeader sort={sort} setSort={setSort} k={k} label={l} /></th>)}</tr></thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.slice(0, 300).map((r) => (
               <tr key={r.key}>
                 <td className="sm">{fmtS(r.date)}</td><td>{r.reg}</td><td><a href={'#/patients/' + r.pid}><b>{r.name}</b></a></td><td className="num">{r.age}</td><td>{r.sex}</td><td className="sm">{r.cat === 'o' ? 'Ortho' : 'General'}</td>
                 <td className={r.planned ? 'planned' : ''}>{r.proc}{r.planned && <span className="sm muted"> (planned)</span>}</td>
@@ -51,6 +54,7 @@ export default function TreatmentRegister() {
           </tbody>
         </table>
       </div>
+      {rows.length > 300 && <p className="sm muted">Showing the first 300 of {rows.length}. Narrow the dates or print to see all.</p>}
     </>
   );
 }

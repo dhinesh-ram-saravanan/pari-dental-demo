@@ -6,12 +6,12 @@ import { invAlerts } from './inventory.js';
 // Raw numbers behind the doctor's overview tiles.
 export function kpiNumbers(db) {
   const t = today(), m = t.slice(0, 7), q = db.queue.filter((x) => x.date === t);
-  const pay = (pre) => db.payments.filter((x) => x.date.startsWith(pre));
+  const pay = (pre) => db.payments.filter((x) => x.date.startsWith(pre) && x.date <= t);
   const timed = db.visits.filter((v) => v.date === t && v.inTime && v.outTime);
-  const ex = db.expenses.filter((e) => e.date.startsWith(m)), dues = owing(db);
+  const ex = db.expenses.filter((e) => e.date.startsWith(m) && e.date <= t), dues = owing(db);
   const collectedMonth = sum(pay(m), (x) => x.amount), spentMonth = sum(ex, (e) => e.amount);
   return {
-    patientsToday: q.length, seen: q.filter((x) => x.status === 'done' || x.status === 'checkout').length, waiting: q.filter((x) => x.status === 'waiting').length,
+    patientsToday: q.length, seen: q.filter((x) => x.status === 'done' || x.status === 'checkout').length, waiting: q.filter((x) => x.status === 'waiting').length, inChair: q.filter((x) => x.status === 'in').length,
     collectedToday: sum(pay(t), (x) => x.amount), paymentsToday: pay(t).length,
     collectedMonth, spentMonth, netMonth: collectedMonth - spentMonth, expensesMonth: ex.length,
     dues: sum(dues, (p) => bal(db, p.id)), owingPatients: dues.length,
@@ -26,7 +26,7 @@ export function kpiNumbers(db) {
 export function kpis(db) {
   const n = kpiNumbers(db), s = (k) => (k === 1 ? '' : 's');
   return [
-    { k: 'today', l: 'Patients today', v: n.patientsToday, s: `${n.seen} seen · ${n.waiting} waiting` },
+    { k: 'today', l: 'Patients today', v: n.patientsToday, s: `${n.seen} seen${n.inChair ? ' · 1 in the chair' : ''} · ${n.waiting} waiting` },
     { k: 'coltoday', l: 'Collected today', v: inr(n.collectedToday), s: `${n.paymentsToday} payment${s(n.paymentsToday)}` },
     { k: 'colmonth', l: 'Collected this month', v: inr(n.collectedMonth), s: `net ${inr(n.netMonth)} after expenses` },
     { k: 'dues', l: 'Pending dues', v: inr(n.dues), s: `${n.owingPatients} patients`, tone: 'pay' },

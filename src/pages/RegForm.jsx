@@ -5,20 +5,24 @@ import { useDb, toast } from '../data/store.js';
 import { validateReg, mobileClash, clean, dobFromParts, DIGIT_FIELDS } from '../logic/validation.js';
 import { ageOf } from '../logic/age.js';
 import { today, fmtD } from '../logic/format.js';
-import { MED, DECL, TITLES } from '../data/constants.js';
+import { MED, DECL, TITLES, COMPLAINTS, RELATIONS } from '../data/constants.js';
 
 // The clinic's paper form. Used by reception, the patient tablet and the QR form.
-export default function RegForm({ initial, kiosk, onSave }) {
+// `self`: the patient's own phone (browser autofill is helpful there, wrong on a shared desk PC or tablet).
+export default function RegForm({ initial, kiosk, self, onSave }) {
   const db = useDb();
   const [r, setR] = useState(initial);
   const [E, setE] = useState({});
   const [sigKey, setSigKey] = useState(0);
-  const dupOk = useRef(false), form = useRef(null), jump = useRef(false);
+  const [clash, setClash] = useState(null);
+  const dupOk = useRef(false), form = useRef(null), jump = useRef(false), titleSet = useRef(!!initial.id);
   const set = (k, v) => { setR((x) => ({ ...x, [k]: v })); setE((e) => { if (!e[k]) return e; const n = { ...e }; delete n[k]; return n; }); };
   useEffect(() => {
     if (!jump.current) return;
     jump.current = false;
-    form.current?.querySelector('.bad, .badbtn, .badbox')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const bad = form.current?.querySelector('.bad, .badbtn, .badbox');
+    bad?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    (bad?.matches('button') ? bad : bad?.querySelector('input, select, [role=radio][tabindex="0"], canvas'))?.focus({ preventScroll: true });
   }, [E]);
 
   // Format mistakes show as soon as the field is left; "required" only on submit.
@@ -28,7 +32,7 @@ export default function RegForm({ initial, kiosk, onSave }) {
     const num = k in DIGIT_FIELDS, left = TEL[k] && r[k] && r[k].length < 10 ? `${r[k].length} of 10 digits` : o.hint;
     const el = (
       <input type={o.type || (num && k !== 'age' ? 'tel' : 'text')} value={r[k] ?? ''} inputMode={num ? 'numeric' : o.type === 'email' ? 'email' : undefined} pattern={num ? '[0-9]*' : undefined}
-        placeholder={o.ph} readOnly={o.readOnly} aria-required={o.req || undefined} aria-invalid={!!E[k] || undefined} autoComplete={AUTO[k] || 'off'} autoCapitalize={k === 'name' ? 'words' : o.type === 'email' ? 'none' : undefined} spellCheck={o.type === 'email' ? false : undefined}
+        placeholder={o.ph} readOnly={o.readOnly} aria-required={o.req || undefined} list={o.list} autoComplete={(self && AUTO[k]) || 'off'} autoCapitalize={k === 'name' ? 'words' : o.type === 'email' ? 'none' : undefined} spellCheck={o.type === 'email' ? false : undefined}
         onChange={(e) => set(k, clean(k, e.target.value))} onBlur={() => check(k)} />
     );
     return <Field label={label} error={E[k]} req={o.req} hint={left} style={o.style}>{TEL[k] ? <span className="telwrap"><span aria-hidden="true">+91</span>{el}</span> : el}</Field>;
@@ -46,7 +50,7 @@ export default function RegForm({ initial, kiosk, onSave }) {
     const errs = validateReg(r);
     if (Object.keys(errs).length) { jump.current = true; setE(errs); toast('Please check the highlighted fields'); return; }
     const clash = mobileClash(db, r);
-    if (clash && !dupOk.current && !kiosk) { dupOk.current = true; toast(`Note: ${clash.name} (Reg. ${clash.reg}) has the same mobile. Press again to save anyway.`); return; }
+    if (clash && !dupOk.current && !kiosk) { dupOk.current = true; setClash(clash); return; }
     onSave(r);
   }
 
@@ -57,13 +61,14 @@ export default function RegForm({ initial, kiosk, onSave }) {
         {!r.id && <p className="autodate">Date <b>{fmtD(today())}</b> <span className="sm muted">· today, filled in for you</span></p>}
         <div className="fgrid3">
           {input('name', 'Full name', { req: true, style: { gridColumn: 'span 2' } })}
-          <Field label="Title"><select value={r.title} onChange={(e) => set('title', e.target.value)}>{TITLES.map((t) => <option key={t}>{t}</option>)}</select></Field>
+          <Field label="Title"><select value={r.title} onChange={(e) => { titleSet.current = true; set('title', e.target.value); }}>{TITLES.map((t) => <option key={t}>{t}</option>)}</select></Field>
         </div>
         <div className="fgrid3">
           <div className={E.sex ? 'bad' : ''}>
             <div className="lbl">Sex<span className="req" aria-hidden="true">*</span></div>
-            <Segmented label="Sex" value={r.sex} options={[['M', 'Male'], ['F', 'Female']]} onChange={(v) => { set('sex', v); if (v === 'M') setR((x) => ({ ...x, preg: false, nurse: false })); }} />
-            {E.sex && <em role="alert">{E.sex}</em>}
+            <Segmented label="Sex" value={r.sex} invalid={!!E.sex} describedBy={E.sex ? 'err-sex' : undefined} options={[['M', 'Male'], ['F', 'Female']]}
+              onChange={(v) => { set('sex', v); setR((x) => ({ ...x, ...(v === 'M' ? { preg: false, nurse: false } : {}), ...(titleSet.current ? {} : { title: v === 'F' ? 'Ms.' : 'Mr.' }) })); }} />
+            {E.sex && <em id="err-sex">{E.sex}</em>}
           </div>
         </div>
         <div className={'dobrow' + (E.dob ? ' bad' : '')} role="group" aria-label="Date of birth">
@@ -73,14 +78,14 @@ export default function RegForm({ initial, kiosk, onSave }) {
             {dobSel('dobM', 'Month of birth', ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => [String(i + 1), m]))}
             {dobSel('dobY', 'Year of birth', [...Array(121)].map((_, i) => [String(year - i), String(year - i)]))}
           </div>
-          {E.dob && <em role="alert">{E.dob}</em>}
+          {E.dob && <em>{E.dob}</em>}
         </div>
         {input('age', 'Age', { req: !r.dob, readOnly: !!r.dob, style: { maxWidth: 220 }, hint: r.dob ? 'Worked out from the date of birth' : 'If you do not know the date of birth, type the age' })}
         {input('address', 'Address', { req: true })}
         <div className="fgrid">
           {input('mobile', 'Mobile number', { req: true, ph: '10 digits' })}{input('email', 'Email', { type: 'email', ph: 'name@example.com' })}
-          {input('emergNo', 'Emergency contact number', { ph: '10 digits' })}{input('emergRel', 'Relation to patient', { ph: 'e.g. Husband' })}
-          {input('prof', 'Profession')}{input('office', 'Office phone', { ph: '10 or 11 digits' })}{input('ref', 'Referred by')}{input('phys', 'Family physician')}{input('physPh', 'Doctor’s phone', { ph: '10 or 11 digits' })}
+          {input('emergNo', 'Emergency contact number', { ph: '10 digits' })}{input('emergRel', 'Relation to patient', { ph: 'e.g. Husband', list: 'dl-rel' })}
+          {input('prof', 'Profession', { list: 'dl-prof' })}{input('office', 'Office phone', { ph: '10 or 11 digits' })}{input('ref', 'Referred by', { list: 'dl-ref' })}{input('phys', 'Family physician', { list: 'dl-phys' })}{input('physPh', 'Doctor’s phone', { ph: '10 or 11 digits' })}
         </div>
       </section>
       <section className="panel"><h2>Are you currently undergoing treatment for any of these?</h2>
@@ -89,22 +94,27 @@ export default function RegForm({ initial, kiosk, onSave }) {
           options={[...MED.map((m) => [m, m, r.med.includes(m)]), ...(r.sex === 'F' ? [['preg', 'Pregnant', r.preg], ['nurse', 'Nursing a child', r.nurse]] : [])]}
           onToggle={(v) => (v === 'preg' || v === 'nurse' ? set(v, !r[v]) : set('med', r.med.includes(v) ? r.med.filter((m) => m !== v) : [...r.med, v]))} />
         {input('other', 'Any other (please specify)')}{input('allergy', 'Allergic to any medicines? (specify)', { ph: 'Leave blank if none' })}{input('complaint', 'Your main complaint', { req: true })}
+        {!r.complaint && <div className="suggest" role="group" aria-label="Common complaints">{COMPLAINTS.map((c) => <button type="button" key={c} onClick={() => set('complaint', c)}>{c}</button>)}</div>}
+        <datalist id="dl-rel">{RELATIONS.map((x) => <option key={x} value={x} />)}</datalist>
+        {['prof', 'ref', 'phys'].map((k) => <datalist key={k} id={'dl-' + k}>{[...new Set([...(k === 'ref' ? ['Friend', 'Family', 'Google', 'Another doctor'] : []), ...db.patients.map((p) => p[k]).filter(Boolean)])].slice(0, 40).map((x) => <option key={x} value={x} />)}</datalist>)}
       </section>
       <section className="panel"><h2>Declaration</h2><p className="decl">{DECL}</p>
         <button type="button" className={'agree' + (r.consent ? ' on' : '') + (E.consent ? ' badbtn' : '')} aria-pressed={r.consent} onClick={() => set('consent', !r.consent)}><span>{r.consent ? '✓' : ''}</span>I agree</button>
-        {E.consent && <em className="errline" role="alert">{E.consent}</em>}
+        {E.consent && <em className="errline">{E.consent}</em>}
         <div className="lbl" style={{ marginTop: 14 }}>Signature<span className="req" aria-hidden="true">*</span></div>
         <div className={'sigwrap' + (E.sig ? ' badbox' : '')}>
           <SignaturePad key={sigKey} initial={r.sigData} onChange={(d) => { setR((x) => ({ ...x, sig: true, sigData: d })); setE((x) => ({ ...x, sig: undefined })); }} />
           <button type="button" className="btn sm ghost" onClick={() => { setR((x) => ({ ...x, sig: false, sigData: null })); setSigKey(sigKey + 1); }}>Clear</button>
         </div>
         {r.sig && !r.sigData && <p className="sm muted" style={{ margin: '6px 0 0' }}>Already signed on the original form.</p>}
-        {E.sig && <em className="errline" role="alert">{E.sig}</em>}
+        {E.sig && <em className="errline">{E.sig}</em>}
+        {!kiosk && !r.id && <button type="button" className={'chip' + (r.paperSig ? ' on' : '')} style={{ marginTop: 8 }} aria-pressed={!!r.paperSig} onClick={() => { set('paperSig', !r.paperSig); setE((x) => ({ ...x, sig: undefined })); }}>Signed on the paper form instead</button>}
         <div className="lbl" style={{ marginTop: 14 }}>Form filled by</div>
         <Segmented label="Form filled by" value={r.forOther ? 'other' : 'self'} options={[['self', 'The patient'], ['other', 'Someone else for the patient']]} onChange={(v) => set('forOther', v === 'other')} />
         {r.forOther && <div className="fgrid" style={{ marginTop: 10 }}>{input('oName', 'Your name', { req: true })}{input('oRel', 'Relationship to patient', { req: true })}</div>}
       </section>
       {!kiosk && <section className="panel"><h2>Reception</h2><div className="lbl">Patient category</div><Segmented label="Patient category" value={r.cat} options={[['g', 'General'], ['o', 'Orthodontics']]} onChange={(v) => set('cat', v)} /></section>}
+      {clash && <p className="warnline" role="alert">{clash.name} (Reg. {clash.reg}) already has this mobile number. If this is a different person, for example a family member, press the button again to save.</p>}
       <div className="savebar">
         <div><b>{r.name ? `${r.title} ${r.name}` : 'New patient'}</b><span>{kiosk ? 'Submit, then take a seat' : r.id ? 'Reg. No. ' + r.reg : `Reg. No. ${db.nextReg} · ${fmtD(today())}`}</span></div>
         <button className="btn primary lg">{kiosk ? 'Submit' : r.id ? 'Save details' : 'Register and add to today'}</button>

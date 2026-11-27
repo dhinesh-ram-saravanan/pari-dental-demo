@@ -31,17 +31,24 @@ export default function Kiosk({ qr }) {
       <form noValidate style={{ marginTop: 20 }} onSubmit={(e) => {
         e.preventDefault();
         if (!MOBILE.test(k.mobile)) return toast('Enter your 10-digit mobile number');
-        const p = db.patients.find((x) => x.mobile === k.mobile);
-        if (p) queue(p.id, p.name); else { toast('We could not find that number. Please fill the form.'); setK({ ...k, step: 'form' }); }
+        const fam = db.patients.filter((x) => x.mobile === k.mobile);
+        if (fam.length > 1) setK({ ...k, step: 'who' }); // a family sharing one number
+        else if (fam[0]) queue(fam[0].id, fam[0].name); else { toast('We could not find that number. Please fill the form.'); setK({ ...k, step: 'form' }); }
       }}>
         <label>Mobile number<span className="telwrap"><span aria-hidden="true">+91</span><input type="tel" inputMode="numeric" placeholder="10 digits" autoComplete="tel-national" value={k.mobile} onChange={(e) => setK({ ...k, mobile: mobileDigits(e.target.value) })} /></span></label>
         <div className="row-actions"><button className="btn primary lg">Continue</button><button type="button" className="btn ghost lg" onClick={restart}>Back</button></div>
       </form>{exit}
     </div>
   );
+  if (k.step === 'who') return (
+    <div className="kiosk"><h1>Who is visiting today?</h1><p className="sub">More than one person uses this number.</p>
+      <div className="kbig">{db.patients.filter((x) => x.mobile === k.mobile).map((p) => <button type="button" className="kbtn" key={p.id} onClick={() => queue(p.id, p.name)}>{p.name}</button>)}
+        <button type="button" className="kbtn" onClick={() => setK({ ...k, step: 'form' })}>Someone new</button></div>{exit}
+    </div>
+  );
   if (k.step === 'form') return (
     <div className="kiosk" style={{ maxWidth: 760 }}><h1>Patient form</h1><p className="sub">{db.clinic.name} · {fmtD(today())}</p>
-      <RegForm kiosk initial={{ ...emptyP(), mobile: k.mobile }} onSave={(r) => { const p = update((d) => savePatient(d, r, { verified: false })); queue(p.id, p.name); }} />{exit}
+      <RegForm kiosk self={qr} initial={{ ...emptyP(), mobile: k.mobile }} onSave={(r) => { const p = update((d) => savePatient(d, r, { verified: false })); queue(p.id, p.name); }} />{exit}
     </div>
   );
   return (

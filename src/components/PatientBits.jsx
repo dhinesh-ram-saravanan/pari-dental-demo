@@ -15,7 +15,7 @@ export function FormCard({ p }) {
   const al = alertsOf(p);
   return (
     <div className="sheetcard">
-      <h3>Patient form · Reg. {p.reg} · {fmtD(p.created)}</h3>
+      <h2>Patient form · Reg. {p.reg} · {fmtD(p.created)}</h2>
       <div className="kv">
         <KV l="Age / Sex" v={`${ageOf(p) ?? '–'} / ${p.sex || '–'}`} /><KV l="Mobile" v={p.mobile} /><KV l="Profession" v={p.prof} />
         <KV l="Address" v={p.address} /><KV l="Referred by" v={p.ref} /><KV l="Emergency contact" v={p.emerg} />
@@ -33,7 +33,7 @@ export function FormCard({ p }) {
 export function SheetTable({ db, pid, extra }) {
   const rows = sheetRows(db, pid, extra);
   return (
-    <div className="tw">
+    <div className="tw" tabIndex={0} role="region" aria-label="Treatment record">
       <table className="sheet">
         <thead><tr><th>Date</th><th>Treatment record</th><th className="num">Payment</th><th className="num">Balance</th></tr></thead>
         <tbody>

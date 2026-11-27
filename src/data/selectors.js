@@ -18,6 +18,17 @@ export const pendingAppr = (db) => db.approvals.filter((a) => a.status === 'pend
 export const treaters = (db) => db.staff.filter((s) => s.active && (s.role === 'Doctor' || s.role === 'Junior doctor'));
 export const itemText = (x) => x.name + (x.teeth?.length ? ' ' + x.teeth.join(',') : '');
 export const waLink = (p, msg) => `https://wa.me/91${(p.mobile || '').replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(msg)}`;
+// Contact actions for a ⋯ menu; none when the patient has no mobile on file (old imported records).
+export const contactItems = (p, msg, again = '') => (p.mobile
+  ? [{ label: 'WhatsApp' + again, href: waLink(p, msg) }, { label: 'Call' + again, href: 'tel:+91' + p.mobile }]
+  : p.office ? [{ label: `Call office phone ${p.office}`, href: 'tel:' + p.office }] : []);
+export const SLOT_TAKEN = (db, date) => new Map(db.appointments.filter((a) => a.date === date && a.status === 'booked').map((a) => [a.time, P(db, a.pid)?.name || 'Booked']));
+// Search by name, Reg. No. or mobile (spaces, +91 and a leading 0 are ignored).
+export function findPatients(db, text) {
+  const s = text.trim().toLowerCase(), dg = s.replace(/\D/g, '').replace(/^(91|0)(?=\d{6,})/, '');
+  if (s.length < 2) return [];
+  return db.patients.filter((p) => p.name.toLowerCase().includes(s) || (dg.length >= 2 && ((p.mobile || '').includes(dg) || String(p.reg).includes(dg))));
+}
 export const remind = (db, p, date, reason, time) => fill(db.clinic.template, { name: p.name, clinic: db.clinic.name, reason: reason || 'check-up', date: fmtD(date) + (time ? ' at ' + time : ''), phone: db.clinic.phone });
 export const dueMsg = (db, p) => `Hello ${p.name}, a balance of ${inr(bal(db, p.id))} is pending at ${db.clinic.name}. You can pay at your next visit. Thank you.`;
 
@@ -49,9 +60,16 @@ export function registerRows(db, D) {
       proc: done ? v.services.map(itemText).join(', ') : ap?.reason || procOf(db, pid), planned: !done, appt: ap ? ap.time : '', walkin: !ap, inT, outT, dur: inT && outT ? mins(outT) - mins(inT) : null,
       remarks: v?.remarks || q?.remarks || '', remRef: v ? 'v:' + v.id : q ? 'q:' + q.id : '', pay: sum(db.payments.filter((x) => x.pid === pid && x.date === D), (x) => x.amount), bal: balOn(db, pid, D), owes: bal(db, pid), doc: v?.handled || (st === 'in' ? DOCTOR : ''), st };
   };
-  db.queue.filter((q) => q.date === D).forEach((q) => { const v = q.visitId ? db.visits.find((x) => x.id === q.visitId) : db.visits.find((x) => x.pid === q.pid && x.date === D); if (v) seen.add(v.id); rows.push(mk(q.pid, q, v)); });
+  db.queue.filter((q) => q.date === D).forEach((q) => {
+    // older seeded entries have no visitId: fall back to that day's visit, but only once and only for a finished entry
+    const v = q.visitId ? db.visits.find((x) => x.id === q.visitId) : q.status === 'done' || q.status === 'checkout' ? db.visits.find((x) => x.pid === q.pid && x.date === D && !seen.has(x.id)) : undefined;
+    if (v) seen.add(v.id); rows.push(mk(q.pid, q, v));
+  });
   db.visits.filter((v) => v.date === D && !seen.has(v.id)).forEach((v) => rows.push(mk(v.pid, null, v)));
   db.appointments.filter((a) => a.date === D && a.status === 'booked' && !rows.some((r) => r.pid === a.pid)).forEach((a) => rows.push(mk(a.pid, null, null, a)));
+  // a patient seen twice in a day: the day's payment is shown once, and keys stay unique
+  const paid = new Set();
+  rows.forEach((r, i) => { if (paid.has(r.pid)) r.pay = 0; paid.add(r.pid); r.key += ':' + i; });
   return rows;
 }
 export function registerRange(db, from, to) {
@@ -88,7 +106,7 @@ export function frontNotices(db) {
 
 export function doctorNotices(db) {
   const N = [];
-  pendingAppr(db).forEach((a) => N.push({ k: 'appr:' + a.id, tone: 'warn', text: `Reception charged ${inr(a.price)} for ${a.name} (list ${inr(a.old)}). Make it the default?`, act: { label: 'Approve', do: 'approve', arg: a.id }, act2: { label: 'Keep ' + inr(a.old), do: 'keep', arg: a.id }, nodismiss: true }));
+  pendingAppr(db).forEach((a) => N.push({ k: 'appr:' + a.id, tone: 'warn', text: `Reception charged ${inr(a.price)} for ${a.name} (${P(db, a.pid)?.name || 'patient'}, ${fmtD(a.date)}; list ${inr(a.old)}). Make it the default?`, act: { label: 'Approve', do: 'approve', arg: a.id }, act2: { label: 'Keep ' + inr(a.old), do: 'keep', arg: a.id }, nodismiss: true }));
   const inv = invAlerts(db);
   if (inv.length) N.push({ k: 'dinv:' + inv.map((i) => i.id + invStatus(i)[1]).join(','), tone: 'warn', text: stockText(inv), act: { label: 'Inventory', do: 'go', arg: '/inventory' } });
   const od = db.cases.filter((c) => c.status === 'open' && c.ortho).filter((c) => { const last = db.visits.filter((v) => v.caseId === c.id).map((v) => v.date).sort().pop(); return last && last < addDays(today(), -40); });

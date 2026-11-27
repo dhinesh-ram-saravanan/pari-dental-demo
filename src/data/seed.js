@@ -76,7 +76,7 @@ export function seed() {
     const price = sum(c.items, (x) => x.price), short = i % 4 === 1 ? Math.min(1500, Math.round((price * 0.2) / 100) * 100) : 0;
     V(c, d(start), [0, 1], c.items[0].price + c.items[1].price, pick(['Cash', 'UPI', 'UPI', 'Card']), null, '', null, i % 2 ? RX[1] : '');
     V(c, d(start + 7), [2], c.items[2].price - short, pick(['Cash', 'UPI', 'Card']), open ? d(start + 21 > -1 ? [2, 5, -2, 0][i % 4] : start + 21) : a === 'Scaling & polishing' ? d(start + 180) : null, open ? b : 'Six-month check-up', null, i % 2 ? RX[0] + '\n' + RX[1] : '');
-    if (!open && b) { V(c, d(start + 20), [3], c.items[3].price, 'UPI'); c.status = 'closed'; }
+    if (!open && b) { V(c, d(Math.min(start + 20, -1)), [3], c.items[3].price, 'UPI'); c.status = 'closed'; } // never dated in the future
     if (!b) c.status = 'closed';
     if (i % 5 === 2) (charts[p.id] = charts[p.id] || {})[pick(['17', '27', '44', '34'])] = 'decay';
   });

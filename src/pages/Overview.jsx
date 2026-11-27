@@ -13,18 +13,18 @@ import { today, fmtS, inr, mins, longDay } from '../logic/format.js';
 
 // The log behind each tile: [column headings, rows of cells]
 function kpiLog(db, k) {
-  const t = today(), m = t.slice(0, 7), name = (pid) => P(db, pid)?.name || '';
+  const t = today(), m = t.slice(0, 7), name = (pid) => { const p = P(db, pid); return p ? <a href={'#/patients/' + pid}>{p.name}</a> : ''; };
   const pay = (x) => [fmtS(x.date), name(x.pid), x.mode, inr(x.amount)];
   switch (k) {
-    case 'today': return [['Token', 'Patient', 'Arrived', 'In–Out', 'Treatment', 'Status'], tq(db).map((x) => { const v = db.visits.find((y) => y.id === x.visitId); return [x.token, name(x.pid), x.time, `${x.inTime || '–'}–${x.outTime || ''}`, v ? v.services.map((s) => s.name).join(', ') : '–', { waiting: 'Waiting', in: 'With you', checkout: 'At checkout', done: 'Done' }[x.status]]; })];
+    case 'today': return [['Token', 'Patient', 'Arrived', 'In–Out', 'Treatment', 'Status'], tq(db).map((x) => { const v = db.visits.find((y) => y.id === x.visitId); return [x.token, name(x.pid), x.time, x.inTime ? `${x.inTime}–${x.outTime || 'now'}` : 'not yet', (v || db.visits.find((y) => y.pid === x.pid && y.date === t && x.status === 'done'))?.services.map((s) => s.name).join(', ') || '–', { waiting: 'Waiting', in: 'With you', checkout: 'At checkout', done: 'Done' }[x.status]]; })];
     case 'coltoday': return [['Date', 'Patient', 'Mode', 'Amount'], db.payments.filter((x) => x.date === t).map(pay)];
-    case 'colmonth': return [['Date', 'Patient', 'Mode', 'Amount'], db.payments.filter((x) => x.date.startsWith(m)).sort((a, b) => b.date.localeCompare(a.date)).map(pay)];
-    case 'dues': return [['Reg No.', 'Patient', 'Category', 'Balance'], owing(db).sort((a, b) => bal(db, b.id) - bal(db, a.id)).map((p) => [p.reg, p.name, p.cat === 'o' ? 'Ortho' : 'General', inr(bal(db, p.id))])];
+    case 'colmonth': return [['Date', 'Patient', 'Mode', 'Amount'], db.payments.filter((x) => x.date.startsWith(m) && x.date <= t).sort((a, b) => b.date.localeCompare(a.date)).map(pay)];
+    case 'dues': return [['Reg No.', 'Patient', 'Category', 'Balance'], owing(db).sort((a, b) => bal(db, b.id) - bal(db, a.id)).map((p) => [p.reg, name(p.id), p.cat === 'o' ? 'Ortho' : 'General', inr(bal(db, p.id))])];
     case 'chair': return [['Patient', 'In', 'Out', 'Duration'], db.visits.filter((v) => v.date === t && v.inTime && v.outTime).map((v) => [name(v.pid), v.inTime, v.outTime, `${mins(v.outTime) - mins(v.inTime)} min`])];
     case 'ortho': return [['Patient', 'Case', 'Due'], db.cases.filter((c) => c.status === 'open' && c.ortho).map((c) => [name(c.pid), caseLine(c), inr(bal(db, c.pid))])];
     case 'fu': return [['Patient', 'Reason', 'Due', 'Status'], dueFU(db).map((v) => [name(v.pid), v.nextReason || '', fmtS(v.nextVisit), v.fu === 'contacted' ? 'Called' : 'To call'])];
-    case 'newp': return [['Reg No.', 'Patient', 'Registered', 'Complaint'], db.patients.filter((p) => (p.created || '').startsWith(m) && !p.imported).map((p) => [p.reg, p.name, fmtS(p.created), p.complaint || ''])];
-    case 'exp': return [['Date', 'Item', 'Category', 'Amount'], db.expenses.filter((e) => e.date.startsWith(m)).map((e) => [fmtS(e.date), e.item, e.category, inr(e.amount)])];
+    case 'newp': return [['Reg No.', 'Patient', 'Registered', 'Complaint'], db.patients.filter((p) => (p.created || '').startsWith(m) && !p.imported).map((p) => [p.reg, name(p.id), fmtS(p.created), p.complaint || ''])];
+    case 'exp': return [['Date', 'Item', 'Category', 'Amount'], db.expenses.filter((e) => e.date.startsWith(m) && e.date <= t).map((e) => [fmtS(e.date), e.item, e.category, inr(e.amount)])];
     default: return [['Item', 'In stock', 'Expiry', 'Status'], invAlerts(db).map((i) => [i.name, `${invQty(i)} ${i.unit}`, nearExp(i) ? fmtS(nearExp(i)) : '–', invStatus(i)[1]])];
   }
 }
@@ -46,7 +46,7 @@ export default function Overview() {
           <div style={{ maxHeight: '62vh', overflow: 'auto' }} tabIndex={0} role="region" aria-label={sel.l + ' log'}>
             <table className="tbl" style={{ fontSize: 13 }}>
               <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-              <tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}{!rows.length && <tr><td colSpan={cols.length} className="muted">Nothing yet.</td></tr>}</tbody>
+              <tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className={j === r.length - 1 && /^[₹−\d]/.test(String(c)) ? 'num' : undefined}>{c}</td>)}</tr>)}{!rows.length && <tr><td colSpan={cols.length} className="muted">Nothing yet.</td></tr>}</tbody>
             </table>
           </div>
         </Modal>

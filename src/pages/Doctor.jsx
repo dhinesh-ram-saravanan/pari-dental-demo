@@ -8,18 +8,19 @@ import { P, SV, svByName, tq, curQ, todayRows, alertsOf, openCases, procOf, pend
 import { handOver } from '../data/actions.js';
 import { ageOf } from '../logic/age.js';
 import { today, fmtD, nowT, minsAgo, inr, sum, uid, sortBy } from '../logic/format.js';
-import { MARKS, NEXTS, RX } from '../data/constants.js';
+import { MARKS, NEXTS, RX, ALLERGY_CLASH } from '../data/constants.js';
 
 const blankRec = (teeth = '') => ({ key: uid(), svcId: '', name: '', teeth, price: '', planItemId: null });
 const recFromItem = (db, x) => ({ key: uid(), svcId: x.svcId || svByName(db, x.name)?.id || 'other', name: x.name, teeth: x.teeth.join(', '), price: x.price ? String(x.price) : '', planItemId: x.id });
 
 function newDraft(db, cur) {
   const oc = openCases(db, cur.pid), nx = oc[0]?.items.find((x) => !x.done);
-  return { qid: cur.id, pid: cur.pid, teeth: [], caseId: oc[0]?.id || 'new', rx: '', remarks: '', nextIn: '', nextReason: '', reasonTouched: false, close: null, recs: [nx ? recFromItem(db, nx) : blankRec()] };
+  return { qid: cur.id, pid: cur.pid, teeth: [], caseId: oc[0]?.id || 'new', rx: '', remarks: '', notes: '', notesTouched: false, nextIn: '', nextReason: '', reasonTouched: false, close: null, recs: [nx ? recFromItem(db, nx) : blankRec()] };
 }
 
 function Peek({ db, pid, onClose }) {
   const p = P(db, pid);
+  if (!p) return null; // removed on another screen
   return (
     <Modal title={`${p.title} ${p.name}`} onClose={onClose} maxWidth={760}>
       <FormCard p={p} />
@@ -37,16 +38,32 @@ function Consult({ db, cur, d }) {
   const p = P(db, cur.pid), set = (patch) => setUi({ doc: { ...d, ...patch } });
   const cs = openCases(db, p.id), c = db.cases.find((x) => x.id === d.caseId), items = c ? c.items : [];
   const used = new Set(d.recs.map((r) => r.planItemId).filter(Boolean)), pending = items.filter((x) => !x.done && !used.has(x.id));
-  const closeIt = d.close === null ? (c ? pending.length === 0 : false) : d.close;
-  const nextReason = d.reasonTouched ? d.nextReason : pending[0] ? itemText(pending[0]) : '';
+  // A plan stays open while anything is still planned or a next visit is asked for.
+  const closeIt = d.close ?? (pending.length === 0 && !d.nextIn);
+  const nextReason = d.reasonTouched ? d.nextReason : pending[0] ? itemText(pending[0]) : p.cat === 'o' ? 'Monthly adjustment' : 'Review';
+  // Clinical notes start from each treatment's usual note; the doctor can change every word.
+  const notes = d.notesTouched ? d.notes : [...new Set(d.recs.map((r) => SV(db, r.svcId)?.note).filter(Boolean))].join(' ');
+  const lastRx = db.visits.filter((v) => v.pid === p.id && v.rx).sort((a, b) => b.date.localeCompare(a.date))[0]?.rx;
+  const allergy = [p.allergy, p.other].filter(Boolean).join(' '), clash = (text) => ALLERGY_CLASH.some(([a, m]) => a.test(allergy) && m.test(text));
+  const addRx = (text) => { if (clash(text) && !window.confirm(`${p.name} is allergic to ${p.allergy}. Add “${text.split(',')[0]}” anyway?`)) return; set({ rx: (d.rx ? d.rx + '\n' : '') + text }); };
   const filled = d.recs.filter((r) => r.name), noPrice = filled.filter((r) => r.price === '').length, tot = sum(filled, (r) => +r.price || 0);
   const setRec = (i, patch) => set({ recs: d.recs.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
-  const pickSvc = (i, v) => { const s = v && v !== 'other' ? SV(db, v) : null; setRec(i, { svcId: v, planItemId: null, name: s ? s.name : '', price: s ? (s.price ? String(s.price) : '') : d.recs[i].price }); };
+  const pickSvc = (i, v) => {
+    const s = v && v !== 'other' ? SV(db, v) : null, r = d.recs[i];
+    // choosing something that is already planned picks up its teeth and price, and ticks the plan
+    const plan = s && items.find((x) => !x.done && !used.has(x.id) && x.name === s.name);
+    setRec(i, { svcId: v, planItemId: plan?.id || null, name: s ? s.name : '', teeth: r.teeth || (plan ? plan.teeth.join(', ') : ''), price: plan?.price ? String(plan.price) : s ? (s.price ? String(s.price) : '') : r.price });
+  };
   const opts = (cat) => db.services.filter((x) => x.cat === cat && x.active).map((x) => <option key={x.id} value={x.id}>{x.name}{x.price ? ' · ' + inr(x.price) : ''}</option>);
-  const mark = (m) => { update((x) => { const ch = (x.charts[p.id] = x.charts[p.id] || {}); d.teeth.forEach((n) => { if (m) ch[n] = m; else delete ch[n]; }); }); set({ teeth: [] }); };
-  const teethToRec = () => { const i = Math.max(0, d.recs.findIndex((r) => !r.teeth)), k = d.recs.findIndex((r) => !r.teeth) < 0 ? d.recs.length - 1 : i; set({ recs: d.recs.map((r, j) => (j === k ? { ...r, teeth: [...d.teeth].sort().join(', ') } : r)), teeth: [] }); };
+  // Marking keeps the teeth selected, so the same teeth can go straight into a treatment row.
+  const mark = (m) => update((x) => { const ch = (x.charts[p.id] = x.charts[p.id] || {}); d.teeth.forEach((n) => { if (m) ch[n] = m; else delete ch[n]; }); });
+  // Selected teeth go to the first row that has a treatment but no teeth yet, else to a new row. Nothing is overwritten.
+  const teethToRec = () => {
+    const tt = [...d.teeth].sort().join(', '), k = d.recs.findIndex((r) => !r.teeth && (!r.svcId || SV(db, r.svcId)?.marks || r.svcId === 'other'));
+    set({ recs: k >= 0 ? d.recs.map((r, j) => (j === k ? { ...r, teeth: tt } : r)) : [...d.recs, blankRec(tt)], teeth: [] });
+  };
   const fromPlan = (it) => { const r = recFromItem(db, it), e = d.recs.findIndex((x) => !x.name); set({ recs: e >= 0 ? d.recs.map((x, j) => (j === e ? r : x)) : [...d.recs, r] }); };
-  const save = () => { if (run((x) => handOver(x, { ...d, nextReason, close: d.close })).ok) setUi({ doc: null }); };
+  const save = () => { if (run((x) => handOver(x, { ...d, nextReason, notes, close: closeIt })).ok) setUi({ doc: null }); };
   return (
     <>
       <div className="inchair" data-testid="in-chair"><i />In your chair since {cur.inTime || cur.time} · token {cur.token} · sent in by reception</div>
@@ -54,7 +71,7 @@ function Consult({ db, cur, d }) {
       <FormCard p={p} />
       <div className="panel">
         <div className="ph"><h2>Examination</h2>
-          {cs.length > 0 && <select style={{ width: 'auto' }} aria-label="Treatment plan" value={d.caseId} onChange={(e) => set({ caseId: e.target.value, close: null, reasonTouched: false })}>{cs.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}<option value="new">+ New plan</option></select>}
+          {cs.length > 0 && <select style={{ width: 'auto' }} aria-label="Treatment plan" value={d.caseId} onChange={(e) => set({ caseId: e.target.value, close: null, reasonTouched: false, recs: d.recs.map((r) => ({ ...r, planItemId: null })) })}>{cs.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}<option value="new">+ New plan</option></select>}
         </div>
         <ToothChart chart={db.charts[p.id]} selected={d.teeth} k={0.55} onToggle={(n) => set({ teeth: d.teeth.includes(n) ? d.teeth.filter((x) => x !== n) : [...d.teeth, n] })} />
         {d.teeth.length > 0 && (
@@ -80,13 +97,15 @@ function Consult({ db, cur, d }) {
         ))}
         <button type="button" className="btn sm ghost" style={{ marginTop: 8 }} onClick={() => set({ recs: [...d.recs, blankRec([...d.teeth].sort().join(', '))], teeth: [] })}>+ Add treatment</button>
         {pending.length > 0 && <p className="sm muted" style={{ margin: '12px 0 0' }}>Still planned: {pending.map((x, i) => <span key={x.id}>{i > 0 && ', '}<button type="button" className="linkbtn" onClick={() => fromPlan(x)}>{itemText(x)}</button></span>)}</p>}
-        <label style={{ marginTop: 12 }}>Remarks (optional)<input value={d.remarks} placeholder="Shown in the treatment register" onChange={(e) => set({ remarks: e.target.value })} /></label>
+        <label style={{ marginTop: 12 }}>Clinical notes<textarea rows="2" value={notes} placeholder="Findings and what was done. Filled in from the treatments you choose." onChange={(e) => set({ notes: e.target.value, notesTouched: true })} /></label>
+        <label>Remarks for the register (optional)<input value={d.remarks} placeholder="Shown in the treatment register" onChange={(e) => set({ remarks: e.target.value })} /></label>
         <div className="sec">Next visit</div>
-        <div className="chips">{NEXTS.map(([v, l]) => <button type="button" key={v} className={'chip' + (d.nextIn === v ? ' on' : '')} aria-pressed={d.nextIn === v} onClick={() => set({ nextIn: v })}>{l}</button>)}</div>
-        {d.nextIn && <input value={nextReason} aria-label="Reason for next visit" style={{ marginBottom: 8 }} onChange={(e) => set({ nextReason: e.target.value, reasonTouched: true })} />}
-        {c && <><div className="lbl" style={{ marginTop: 12 }}>This plan is</div><Segmented label="This plan is" value={closeIt ? 'done' : 'open'} options={[['open', 'Ongoing'], ['done', 'Completed']]} onChange={(v) => set({ close: v === 'done' })} /></>}
+        <div className="chips" role="group" aria-label="Next visit">{NEXTS.map(([v, l]) => <button type="button" key={v} className={'chip' + (d.nextIn === v ? ' on' : '')} aria-pressed={d.nextIn === v} onClick={() => set({ nextIn: v })}>{l}</button>)}</div>
+        {d.nextIn && <input value={nextReason} aria-label="Reason for next visit" placeholder="Reason, e.g. Review" style={{ marginBottom: 8 }} onChange={(e) => set({ nextReason: e.target.value, reasonTouched: true })} />}
+        <div className="lbl" style={{ marginTop: 12 }}>This treatment plan is</div><Segmented label="This treatment plan is" value={closeIt ? 'done' : 'open'} options={[['open', 'Ongoing'], ['done', 'Completed']]} onChange={(v) => set({ close: v === 'done' })} />
         <details className="more" open={!!d.rx}><summary>Prescription{d.rx ? ' ✓' : ''}</summary>
-          <div className="quick">{RX.map((r) => <button type="button" className="rxchip" key={r} onClick={() => set({ rx: (d.rx ? d.rx + '\n' : '') + r })}>+ {r.split(',')[0]}</button>)}</div>
+          {p.allergy && <p className="warnline">Allergic to {p.allergy}</p>}
+          <div className="quick">{lastRx && <button type="button" className="rxchip" onClick={() => addRx(lastRx)}>+ Repeat last prescription</button>}{RX.map((r) => <button type="button" className="rxchip" key={r} onClick={() => addRx(r)}>+ {r.split(',')[0]}</button>)}</div>
           <textarea rows="3" aria-label="Prescription" value={d.rx} onChange={(e) => set({ rx: e.target.value })} />
         </details>
         <details className="more"><summary>Previous visits</summary><VisitsList db={db} pid={p.id} n={5} /></details>
@@ -157,6 +176,7 @@ export default function Doctor() {
             <div className="cmpl"><span>Complaint</span>{p.complaint || '–'}</div>
             {db.visits.some((v) => v.pid === p.id) ? <SheetTable db={db} pid={p.id} /> : <p className="sm muted" style={{ margin: 0 }}>First visit. No treatment yet.</p>}
             {openCases(db, p.id)[0] && <p className="sm" style={{ margin: '12px 0 0' }}>Open plan: <b>{openCases(db, p.id)[0].title}</b>, next {procOf(db, p.id)}</p>}
+            <p className="sm" style={{ margin: '10px 0 0' }}><a href={'#/patients/' + p.id}>Open full record</a></p>
           </div>
         )}
       </li>

@@ -11,7 +11,7 @@ export default function Register({ id }) {
   const db = getDb(), ui = useUi(), p = id && P(db, id);
   if (id && !p) return <Head title="Patient not found" />;
   const save = (r) => {
-    if (p) { update((d) => savePatient(d, r)); toast('Patient details saved'); go(ui.role === 'doctor' ? '/patients/' + p.id : '/front-desk'); return; }
+    if (p) { update((d) => savePatient(d, r)); toast('Patient details saved'); go(p.verified ? '/patients/' + p.id : '/front-desk'); return; }
     run((d) => addToQueue(d, savePatient(d, r).id, 'Walk-in'));
     go('/front-desk');
   };
@@ -20,7 +20,7 @@ export default function Register({ id }) {
       <Head title={p ? 'Check patient form' : 'New patient'} sub={p ? `Submitted by the patient · Reg. No. ${p.reg}` : `Reg. No. ${db.nextReg} · ${fmtD(today())}`}>
         <button type="button" className="btn ghost" onClick={() => window.history.back()}>Cancel</button>
       </Head>
-      <RegForm initial={p ? formFromPatient(p) : emptyP()} onSave={save} />
+      <RegForm initial={p ? formFromPatient(p) : { ...emptyP(), ...ui.regPrefill }} onSave={save} />
     </>
   );
 }

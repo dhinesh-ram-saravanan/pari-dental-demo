@@ -93,7 +93,7 @@ test.describe.serial('2–4 · One visit, start to finish', () => {
     await page.getByLabel('Treatment 2', { exact: true }).selectOption({ label: 'Composite filling · ₹1,200' });
     await page.getByLabel('Teeth for treatment 2').fill('25');
     await page.getByLabel('Price for treatment 2 (optional)').fill(''); // blank: reception enters it
-    await page.getByLabel('Remarks (optional)').fill('Sensitive to cold');
+    await page.getByLabel('Remarks for the register (optional)').fill('Sensitive to cold');
     await page.getByRole('button', { name: '1 week' }).click();
     await page.getByText('Prescription', { exact: true }).click();
     await page.getByRole('button', { name: '+ Sensitivity toothpaste' }).click();
@@ -155,7 +155,7 @@ test.describe.serial('2–4 · One visit, start to finish', () => {
     await setRole(page, 'Doctor');
     await page.getByRole('link', { name: 'Overview' }).click();
     const alert = page.locator('.notices li', { hasText: 'Composite filling' });
-    await expect(alert).toContainText('Reception charged ₹1,000 for Composite filling (list ₹1,200)');
+    await expect(alert).toContainText('Reception charged ₹1,000 for Composite filling (Lakshmi Ramesh');
     await alert.getByRole('button', { name: 'Approve' }).click();
     await expect(toast(page)).toContainText('Composite filling is now ₹1,000');
     await expect(page.locator('.kpi', { hasText: 'Collected today' })).toContainText('₹1,300');
@@ -189,11 +189,10 @@ test('5 · Calendar: mark called → Called list → Book clears it', async ({ p
 
   // Double booking the same slot is blocked.
   await page.getByRole('button', { name: '+ Book appointment' }).click();
-  await dlg.getByLabel('Patient').selectOption({ index: 3 });
+  await dlg.getByRole('combobox', { name: 'Patient' }).selectOption({ index: 3 });
   await dlg.getByLabel('Date').fill(day);
-  await dlg.getByLabel('Time').selectOption('09:00');
-  await dlg.getByRole('button', { name: 'Book' }).click();
-  await expect(toast(page)).toContainText('is already booked');
+  await expect(dlg.getByRole('option', { name: `09:00 · ${name}` })).toBeDisabled(); // the taken slot cannot be picked
+  await expect(dlg.getByLabel('Time')).toHaveValue('09:30'); // the next free slot is offered instead
 });
 
 test('6 · Registers: import the sample Excel, check the preview, export and re-read', async ({ page }, info) => {
@@ -316,6 +315,11 @@ test('Reports: letter fills from the record, edits show in the A4 preview', asyn
   await expect(preview).toContainText('- Rs 950');
   await page.screenshot({ path: 'screenshots/desktop-report-editor.png', fullPage: true });
   await axe(page);
+  // An unfilled [diagnosis] is flagged, and saving asks first.
+  await expect(page.getByText('Fill in the part in [square brackets] before printing.')).toBeVisible();
+  const text = page.getByLabel('Report text');
+  await text.fill((await text.inputValue()).replace('[diagnosis]', 'a grossly decayed tooth no. 48'));
+  await expect(preview).toContainText('grossly decayed tooth no. 48');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.li', { hasText: 'Mohammed Irfan' }).first()).toBeVisible();
 });

@@ -38,7 +38,8 @@ export default function PatientInfo() {
     if (!file) return;
     try {
       const XLSX = await loadXlsx();
-      const wb = XLSX.read(await file.arrayBuffer()), rows = parseSheet(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true }), db.patients.map((p) => p.reg));
+      // raw: keep CSV dates as typed (dd/mm/yyyy) instead of letting the library read them as US month/day
+      const wb = XLSX.read(await file.arrayBuffer(), { raw: true }), rows = parseSheet(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true }), db.patients);
       if (rows.length) setImp({ file: file.name, rows }); else toast('No rows found in that sheet');
     } catch { toast('Could not read that file. Save it as .xlsx and try again.'); }
   };
@@ -46,7 +47,7 @@ export default function PatientInfo() {
   return (
     <>
       <Head title="Patient information register" sub="The clinic’s patient sheet. Import the old Excel records, export everything back to Excel.">
-        <label className="btn ghost filebtn">Import Excel<input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} hidden data-testid="import-file" /></label>
+        <label className="btn ghost filebtn">Import Excel<input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} data-testid="import-file" /></label>
         <button type="button" className="btn primary" onClick={() => exportXL(db)}>Export Excel</button>
       </Head>
       <div className="filters">

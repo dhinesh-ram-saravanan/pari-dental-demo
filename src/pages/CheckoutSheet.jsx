@@ -2,20 +2,27 @@ import { useState } from 'react';
 import Modal from '../components/Modal.jsx';
 import { RxPrint } from '../components/Prints.jsx';
 import { useDb, useUi, setUi, run, update, toast } from '../data/store.js';
-import { P, svByName, treaters, caseLine, waLink, remind } from '../data/selectors.js';
-import { checkout } from '../data/actions.js';
+import { P, svByName, treaters, caseLine, waLink, remind, SLOT_TAKEN } from '../data/selectors.js';
+import { checkout, firstFree } from '../data/actions.js';
 import { balBefore } from '../logic/balance.js';
 import { today, inr, sum, uid } from '../logic/format.js';
 import { NEXTS, SLOTS } from '../data/constants.js';
 
 // Reception's checkout, as a sheet over the front desk. Draft lives in ui.co.
 export default function CheckoutSheet() {
-  const db = useDb(), { co } = useUi();
+  const db = useDb(), ui = useUi(), { co } = ui;
   const [staff, setStaff] = useState(null); // inline "+ Add" for Handled by
   const x = db.queue.find((y) => y.id === co.qid), v = x && db.visits.find((y) => y.id === x.visitId);
   if (!v || x.status !== 'checkout') return null; // finished in another tab
   const p = P(db, x.pid), c = db.cases.find((y) => y.id === v.caseId);
-  const set = (patch) => setUi({ co: { ...co, ...patch } });
+  // every change is kept as a draft for this patient, so closing the sheet by mistake loses nothing
+  const set = (patch) => { const n = { ...co, ...patch }; setUi({ co: n, coDrafts: { ...ui.coDrafts, [co.qid]: n } }); };
+  const taken = SLOT_TAKEN(db, co.date);
+  const save = () => {
+    const over = (+co.paid || 0) - due;
+    if (over > 0 && !window.confirm(`${inr(+co.paid)} is ${inr(over)} more than the total due. Keep ${inr(over)} as an advance?`)) return;
+    if (run((d) => checkout(d, co)).ok) { const rest = { ...ui.coDrafts }; delete rest[co.qid]; setUi({ co: null, coDrafts: rest }); }
+  };
   const charge = sum(co.lines, (l) => l.price), prev = balBefore(db, p.id, v.id), due = prev + charge, paid = +co.paid || 0, nb = due - paid;
   const chip = (on, label, onClick) => <button key={label} type="button" className={'chip' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>{label}</button>;
   return (
@@ -25,7 +32,7 @@ export default function CheckoutSheet() {
         return (
           <div className="due" key={i}>
             <span>{l.name}{l.teeth.length ? ' · ' + l.teeth.join(', ') : ''}{l.price === null ? <span className="badge warn"> enter price</span> : diff ? <span className="badge warn"> list {inr(s.price)}</span> : null}</span>
-            <input type="number" min="0" value={l.price ?? ''} placeholder={s?.price ? String(s.price) : '₹'} style={{ width: 100, textAlign: 'right' }} aria-label={`Price for ${l.name}`}
+            <input type="number" min="0" step="1" inputMode="numeric" value={l.price ?? ''} placeholder={s?.price ? String(s.price) : '₹'} style={{ width: 100, textAlign: 'right' }} aria-label={`Price for ${l.name}`}
               onChange={(e) => set({ lines: co.lines.map((y, j) => (j === i ? { ...y, price: e.target.value === '' ? null : +e.target.value } : y)) })} />
           </div>
         );
@@ -33,8 +40,8 @@ export default function CheckoutSheet() {
       <div className="due muted"><span>Previous balance</span><span>{inr(prev)}</span></div>
       <div className="due tot"><span>Total due</span><span data-testid="total-due">{inr(due)}</span></div>
       <div className="sec">Payment</div>
-      <div className="amt">₹<input type="number" min="0" value={co.paid} aria-label="Amount received" onChange={(e) => set({ paid: e.target.value })} /></div>
-      <div className="chips" style={{ marginTop: 8 }}>
+      <div className="amt">₹<input type="number" min="0" step="1" inputMode="numeric" data-autofocus value={co.paid} aria-label="Amount received" onChange={(e) => set({ paid: e.target.value })} /></div>
+      <div className="chips" style={{ marginTop: 8 }} role="group" aria-label="Payment">
         {chip(co.paid !== '' && paid === due, 'Full', () => set({ paid: String(due) }))}{chip(co.paid === '0', 'Nothing today', () => set({ paid: '0' }))}
         {['Cash', 'UPI', 'Card'].map((m) => chip(co.mode === m, m, () => set({ mode: m })))}
       </div>
@@ -61,8 +68,8 @@ export default function CheckoutSheet() {
       {co.nextMode !== 'none' && (
         <div className="fgrid3">
           <label>Reason<input value={co.reason} onChange={(e) => set({ reason: e.target.value })} /></label>
-          <label>Date<input type="date" value={co.date} min={today()} onChange={(e) => set({ date: e.target.value })} /></label>
-          {co.nextMode === 'book' ? <label>Time<select value={co.time} onChange={(e) => set({ time: e.target.value })}>{SLOTS.map((s) => <option key={s}>{s}</option>)}</select></label> : <span />}
+          <label>Date<input type="date" value={co.date} min={today()} onChange={(e) => set({ date: e.target.value, time: e.target.value ? firstFree(db, e.target.value) : co.time })} /></label>
+          {co.nextMode === 'book' ? <label>Time<select className="slots" value={co.time} onChange={(e) => set({ time: e.target.value })}>{SLOTS.map((s) => <option key={s} value={s} disabled={taken.has(s)}>{s}{taken.has(s) ? ` · ${taken.get(s)}` : ''}</option>)}</select></label> : <span />}
         </div>
       )}
       <p className="sm muted" style={{ margin: '0 0 12px' }}>Plan: {c ? (c.status === 'closed' ? 'completed' : 'ongoing, ' + caseLine(c)) : '–'}</p>
@@ -70,7 +77,7 @@ export default function CheckoutSheet() {
         <span><b>{inr(paid)}</b> received · {nb < 0 ? 'advance ' + inr(-nb) : 'balance ' + inr(nb)}</span>
         <span className="row-actions">
           {co.nextMode === 'book' && <a className="btn wa" target="_blank" rel="noopener noreferrer" href={waLink(p, remind(db, p, co.date, co.reason, co.time))}>WhatsApp</a>}
-          <button type="button" className="btn primary lg" onClick={() => { if (run((d) => checkout(d, co)).ok) setUi({ co: null }); }}>Save</button>
+          <button type="button" className="btn primary lg" onClick={save}>Save</button>
         </span>
       </div>
     </Modal>

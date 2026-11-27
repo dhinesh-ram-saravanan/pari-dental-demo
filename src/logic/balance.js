@@ -9,8 +9,15 @@ export const balBefore = (db, pid, visitId) => bal(db, pid) - sum(db.visits.filt
 export const balOn = (db, pid, day) =>
   sum(db.visits.filter((v) => v.pid === pid && v.date <= day), (v) => v.total) -
   sum(db.payments.filter((x) => x.pid === pid && x.date <= day), (x) => x.amount);
-export const owing = (db) => db.patients.filter((p) => bal(db, p.id) > 0);
-export const totalDues = (db) => sum(owing(db), (p) => bal(db, p.id));
+// All balances in one pass (the per-patient functions above are too slow for a few thousand imported patients).
+export function balances(db) {
+  const m = {};
+  db.visits.forEach((v) => { m[v.pid] = (m[v.pid] || 0) + (+v.total || 0); });
+  db.payments.forEach((x) => { m[x.pid] = (m[x.pid] || 0) - x.amount; });
+  return m;
+}
+export const owing = (db) => { const m = balances(db); return db.patients.filter((p) => m[p.id] > 0); };
+export const totalDues = (db) => sum(Object.values(balances(db)), (b) => (b > 0 ? b : 0));
 
 const svcText = (v) => v.services.map((s) => (s.teeth?.length ? s.teeth.join(', ') + ' ' : '') + s.name).join(', ');
 
