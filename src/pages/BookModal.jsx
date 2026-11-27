@@ -3,7 +3,7 @@ import Modal from '../components/Modal.jsx';
 import { Field } from '../components/controls.jsx';
 import { useDb, useUi, setUi, run } from '../data/store.js';
 import { submitBooking } from '../data/actions.js';
-import { validateBooking, digits } from '../logic/validation.js';
+import { validateBooking, mobileDigits } from '../logic/validation.js';
 import { today, addDays } from '../logic/format.js';
 import { SLOTS } from '../data/constants.js';
 
@@ -30,7 +30,7 @@ export default function BookModal() {
         {f.pid === 'new' && (
           <div className="fgrid">
             <Field label="Name" req error={E.n}><input value={f.newName} onChange={(e) => set('newName', e.target.value)} /></Field>
-            <Field label="Mobile" req error={E.m}><input inputMode="numeric" value={f.newPhone} onChange={(e) => set('newPhone', digits(e.target.value))} /></Field>
+            <Field label="Mobile" req error={E.m}><input type="tel" inputMode="numeric" placeholder="10 digits" value={f.newPhone} onChange={(e) => set('newPhone', mobileDigits(e.target.value))} /></Field>
           </div>
         )}
         <div className="fgrid3">

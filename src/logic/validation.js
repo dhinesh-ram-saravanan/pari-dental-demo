@@ -7,16 +7,36 @@ export const DIGIT_FIELDS = { mobile: 10, emergNo: 10, office: 11, physPh: 11, a
 // Strip everything but digits as the user types.
 export const digits = (v, max = 10) => String(v ?? '').replace(/\D/g, '').slice(0, max);
 
-export const emptyP = () => ({ title: 'Mr.', name: '', age: '', sex: '', dob: '', address: '', mobile: '', emergNo: '', emergRel: '', email: '', prof: '', office: '', ref: '', phys: '', physPh: '', med: [], other: '', preg: false, nurse: false, allergy: '', complaint: '', cat: 'g', consent: false, sig: false, forOther: false, oName: '', oRel: '' });
+// Mobile numbers: also drops a pasted or autofilled +91 / leading 0 before keeping 10 digits.
+export const mobileDigits = (v) => {
+  let d = String(v ?? '').replace(/\D/g, '');
+  if (d.length > 10 && d.startsWith('91')) d = d.slice(2);
+  if (d.length > 10 && d.startsWith('0')) d = d.slice(1);
+  return d.slice(0, 10);
+};
+export const clean = (k, v) => (k === 'mobile' || k === 'emergNo' ? mobileDigits(v) : k in DIGIT_FIELDS ? digits(v, DIGIT_FIELDS[k]) : v);
+
+// Date of birth is picked as day / month / year. → { dob, error }
+export function dobFromParts(d, m, y) {
+  if (!d && !m && !y) return { dob: '', error: '' };
+  if (!d || !m || !y) return { dob: '', error: 'Choose the day, month and year' };
+  const x = new Date(+y, +m - 1, +d);
+  if (x.getDate() !== +d) return { dob: '', error: 'That date does not exist' };
+  return { dob: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, error: '' };
+}
+
+export const emptyP = () => ({ title: 'Mr.', name: '', age: '', sex: '', dob: '', dobD: '', dobM: '', dobY: '', address: '', mobile: '', emergNo: '', emergRel: '', email: '', prof: '', office: '', ref: '', phys: '', physPh: '', med: [], other: '', preg: false, nurse: false, allergy: '', complaint: '', cat: 'g', consent: false, sig: false, forOther: false, oName: '', oRel: '' });
 
 // Returns { field: message } for the registration form; empty object means valid.
 export function validateReg(r) {
   const e = {}, t = today();
   if (!r.name.trim()) e.name = 'Enter the full name'; else if (!NAME.test(r.name.trim())) e.name = 'Letters, spaces and dots only';
   if (!r.sex) e.sex = 'Choose one';
-  if (r.dob) { if (r.dob > t) e.dob = 'Date of birth cannot be in the future'; else if (ageOf({ dob: r.dob }) > 120) e.dob = 'Check the year'; }
+  const parts = dobFromParts(r.dobD, r.dobM, r.dobY);
+  if (parts.error) e.dob = parts.error;
+  else if (r.dob) { if (r.dob > t) e.dob = 'Date of birth cannot be in the future'; else if (ageOf({ dob: r.dob }) > 120) e.dob = 'Check the year'; }
   const noAge = r.age === '' || r.age == null;
-  if (!r.dob && noAge) e.age = 'Enter age or date of birth';
+  if (!r.dob && noAge && !e.dob) e.age = 'Enter age or date of birth';
   else if (!noAge && !(+r.age >= 0 && +r.age <= 120 && Number.isInteger(+r.age))) e.age = 'Age must be 0 to 120';
   if (!MOBILE.test(r.mobile || '')) e.mobile = r.mobile ? 'Must be 10 digits starting with 6, 7, 8 or 9' : 'Enter the mobile number';
   if (r.emergNo && !MOBILE.test(r.emergNo)) e.emergNo = '10 digits';
@@ -50,7 +70,7 @@ export function savePatient(db, r, { verified = true } = {}) {
 }
 
 // Form state for editing an existing patient.
-export const formFromPatient = (p) => ({ ...emptyP(), ...p, age: p.age ?? '', med: [...(p.med || [])], consent: true, forOther: !!p.forOther, oName: p.forOther?.name || '', oRel: p.forOther?.rel || '', emergNo: digits((p.emerg || '').split('·')[0]), emergRel: ((p.emerg || '').split('·')[1] || '').trim() });
+export const formFromPatient = (p) => ({ ...emptyP(), ...p, age: p.age ?? '', dobY: p.dob ? p.dob.slice(0, 4) : '', dobM: p.dob ? String(+p.dob.slice(5, 7)) : '', dobD: p.dob ? String(+p.dob.slice(8)) : '', med: [...(p.med || [])], consent: true, forOther: !!p.forOther, oName: p.forOther?.name || '', oRel: p.forOther?.rel || '', emergNo: mobileDigits((p.emerg || '').split('·')[0]), emergRel: ((p.emerg || '').split('·')[1] || '').trim() });
 
 export function validateBooking({ date, time, isNew, newName, newPhone }) {
   const E = {};

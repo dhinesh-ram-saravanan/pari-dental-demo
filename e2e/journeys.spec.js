@@ -45,6 +45,7 @@ test.describe('1 · Patient: QR form on a phone', () => {
     // It is in reception's queue straight away, flagged as a new form.
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/#/front-desk');
+    await page.reload();
     await expect(row(page, 'Anbu Selvan')).toContainText('New form');
     await expect(row(page, 'Anbu Selvan')).toContainText('Diabetes');
   });

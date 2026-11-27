@@ -56,6 +56,11 @@ export function handOver(db, d) {
   const q = curQ(db), recs = d.recs.filter((r) => r.name.trim());
   if (!q) return { ok: false, msg: 'No patient is in the chair' };
   if (!recs.length) return { ok: false, msg: 'Choose at least one treatment done today' };
+  for (const r of recs) {
+    const bad = r.teeth.split(/[ ,]+/).filter(Boolean).find((n) => !/^[1-4][1-8]$/.test(n));
+    if (bad) return { ok: false, msg: `“${bad}” is not a tooth number. Use 11–18, 21–28, 31–38, 41–48.` };
+    if (r.price !== '' && !(+r.price >= 0)) return { ok: false, msg: `Check the price for ${r.name}` };
+  }
   const p0 = P(db, d.pid);
   let c = db.cases.find((x) => x.id === d.caseId);
   if (!c) { const f = recs[0]; c = { id: 'c' + uid(), pid: p0.id, cat: SV(db, f.svcId)?.cat || p0.cat, title: f.name.replace(' package', '') + (f.teeth ? ' – ' + f.teeth : ''), status: 'open', opened: today(), sittings: 1, items: [], ortho: /package/.test(f.name) }; db.cases.push(c); }
@@ -91,6 +96,8 @@ export function coInit(db, qid) {
 export function checkout(db, co) {
   const x = db.queue.find((y) => y.id === co.qid), v = db.visits.find((y) => y.id === x.visitId), p = P(db, x.pid), paid = +co.paid || 0;
   if (co.lines.some((l) => l.price === null)) return { ok: false, msg: 'Enter the price for every treatment' };
+  if (co.lines.some((l) => !(l.price >= 0))) return { ok: false, msg: 'A price cannot be less than 0' };
+  if (co.paid !== '' && !(paid >= 0)) return { ok: false, msg: 'The amount received cannot be less than 0' };
   if (co.paid === '') return { ok: false, msg: 'Enter the amount received (0 if nothing today)' };
   if (co.nextMode !== 'none' && (!co.date || co.date < today())) return { ok: false, msg: 'Choose today or a later date for the next visit' };
   if (co.nextMode === 'book') { const r = bookAppt(db, p.id, co.date, co.time, co.reason); if (!r.ok) return r; }

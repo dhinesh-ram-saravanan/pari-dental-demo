@@ -643,7 +643,17 @@ label>span:first-child{display:inline}
 
 /* ---- additions for the React build ---- */
 /* Amber darkened from #b4610b so small warning text passes WCAG AA on the soft amber and paper backgrounds. */
-:root[data-palette="linen"]{--warn:#8a4a06}
+/* Green darkened from #3e7b4f for the same reason ("Completed" and "OK" pills). */
+:root[data-palette="linen"]{--warn:#8a4a06;--ok:#33683f}
 /* Item names in tables are buttons for keyboard use, but read as plain bold text. */
 .tbl .linkbtn{text-decoration:none;color:inherit}
 .tbl .linkbtn:hover{text-decoration:underline}
+/* Registration form: +91 phone field, day/month/year date of birth, automatic form date. */
+.telwrap{display:flex;align-items:stretch}
+.telwrap>span{display:grid;place-items:center;padding:0 12px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;background:var(--sunk);color:var(--muted);font-weight:600}
+.telwrap>input{border-top-left-radius:0!important;border-bottom-left-radius:0!important;min-width:0;flex:1}
+.dobrow{margin:0 0 14px}
+.dobsel{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) minmax(0,1.2fr);gap:8px;max-width:460px}
+.dobrow.bad select{border-color:var(--bad)!important}
+.autodate{margin:-4px 0 14px}
+input[readonly]{background:var(--sunk);color:var(--muted)}

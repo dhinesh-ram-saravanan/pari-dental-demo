@@ -57,7 +57,7 @@ export default function FrontDesk() {
         <div><h1>Front desk</h1><p className="lede">{longDay()}</p></div>
         <div className="row-actions">
           <button type="button" className="btn primary" onClick={() => go('/register')}>+ New patient</button>
-          <Menu items={[{ label: 'Patient tablet', onClick: () => go('/tablet') }, { label: 'QR code for the form', onClick: () => setUi({ qr: true }) }, { label: 'Book an appointment', onClick: () => setUi({ book: {} }) }]} />
+          <Menu label="More front desk actions" items={[{ label: 'Patient tablet', onClick: () => go('/tablet') }, { label: 'QR code for the form', onClick: () => setUi({ qr: true }) }, { label: 'Book an appointment', onClick: () => setUi({ book: {} }) }]} />
         </div>
       </div>
       <div className="searchbig"><input type="search" placeholder="Returning patient? Type name, mobile or Reg. No." value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" aria-label="Find a patient" /></div>

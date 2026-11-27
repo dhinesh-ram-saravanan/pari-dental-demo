@@ -5,7 +5,7 @@ import { seed } from '../src/data/seed.js';
 import { today, addDays } from '../src/logic/format.js';
 import { ageOf } from '../src/logic/age.js';
 import { bal, balBefore, balOn, sheetRows, priceApprovals } from '../src/logic/balance.js';
-import { validateReg, emptyP, digits, savePatient, allocReg, mobileClash, validateBooking, validateStockIn } from '../src/logic/validation.js';
+import { validateReg, emptyP, digits, mobileDigits, dobFromParts, savePatient, allocReg, mobileClash, validateBooking, validateStockIn } from '../src/logic/validation.js';
 import { xlDate, parseSheet, importCounts, applyImport, exportRows } from '../src/logic/importParse.js';
 import { callLists, markCalled, moveBack, closeFU, dueFU } from '../src/logic/followups.js';
 import { invStatus, invQty, useStock as takeStock, stockIn } from '../src/logic/inventory.js';
@@ -87,6 +87,20 @@ describe('registration validation', () => {
     expect(digits('+91 98765-43210')).toBe('9198765432');
     expect(digits('98a76 5', 10)).toBe('98765');
     expect(digits('04422223333', 11)).toBe('04422223333');
+  });
+  it('mobile field drops +91 or a leading 0 and keeps 10 digits', () => {
+    expect(mobileDigits('+91 98765 43210')).toBe('9876543210');
+    expect(mobileDigits('09876543210')).toBe('9876543210');
+    expect(mobileDigits('98765-43210 99')).toBe('9876543210');
+    expect(mobileDigits('91234')).toBe('91234');
+  });
+  it('date of birth from day, month and year', () => {
+    expect(dobFromParts('', '', '')).toEqual({ dob: '', error: '' });
+    expect(dobFromParts('5', '3', '1990')).toEqual({ dob: '1990-03-05', error: '' });
+    expect(dobFromParts('5', '', '1990').error).toBeTruthy();
+    expect(dobFromParts('31', '2', '2000').error).toBe('That date does not exist');
+    expect(err({ dobD: '31', dobM: '2', dobY: '2000' }).dob).toBeTruthy();
+    expect(err({ dobD: '5', dobM: '', dobY: '', age: '' }).age).toBeUndefined(); // one clear error, not two
   });
   it('emergency contact needs a valid number and a relation', () => {
     expect(err({ emergNo: '123' }).emergNo).toBeTruthy();
@@ -282,12 +296,22 @@ describe('the visit flow', () => {
     expect(db.charts[cur.pid]['25']).toBe('filled');
     expect(curQ(db)).toBeUndefined();
   });
+  it('hand over rejects teeth that do not exist and negative prices', () => {
+    const cur = curQ(db), rec = (patch) => ({ pid: cur.pid, caseId: 'new', recs: [{ svcId: '', name: 'Consultation', teeth: '', price: '200', ...patch }] });
+    expect(handOver(db, rec({ teeth: '19' })).ok).toBe(false);
+    expect(handOver(db, rec({ teeth: 'abc' })).ok).toBe(false);
+    expect(handOver(db, rec({ price: '-5' })).ok).toBe(false);
+    expect(handOver(db, rec({ teeth: '18, 48' })).ok).toBe(true);
+  });
   it('checkout: needs every price, takes a part payment, books the next visit', () => {
     const cur = finishCurrent(), co = coInit(db, cur.id), before = bal(db, cur.pid);
     co.lines[0].price = null;
     expect(checkout(db, { ...co, paid: '0' }).ok).toBe(false);
+    co.lines[0].price = -1;
+    expect(checkout(db, { ...co, paid: '0' }).ok).toBe(false);
     co.lines[0].price = 200;
     expect(checkout(db, co).ok).toBe(false); // amount not entered
+    expect(checkout(db, { ...co, paid: '-10' }).ok).toBe(false);
     const r = checkout(db, { ...co, paid: '50', mode: 'Cash', nextMode: 'book', date: addDays(t, 9), time: '09:30', reason: 'Review' });
     expect(r.ok).toBe(true);
     expect(bal(db, cur.pid)).toBe(before - 50);
