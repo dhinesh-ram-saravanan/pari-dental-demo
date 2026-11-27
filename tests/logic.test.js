@@ -12,7 +12,7 @@ import { invStatus, invQty, useStock as takeStock, stockIn } from '../src/logic/
 import { kpiNumbers, kpis } from '../src/logic/kpi.js';
 import { addToQueue, bookAppt, submitBooking, sendIn, handOver, coInit, checkout, payDue, decideApproval, cancelBooking, removeFromQueue, backToWaiting, firstFree } from '../src/data/actions.js';
 import { curQ, tq, nextWaiting, registerRows, findPatients, frontNotices } from '../src/data/selectors.js';
-import { labFor, labToCall, labOverdue, markArrived, setLabDetails, cancelLab } from '../src/logic/lab.js';
+import { labFor, labToCall, labOverdue, markArrived, setLabDetails, cancelLab, labItemErrors, addLabItem } from '../src/logic/lab.js';
 import { packForm, unpackForm } from '../src/logic/handoff.js';
 import { takeBack, reopenCheckout, deletePayment } from '../src/data/actions.js';
 import { MED } from '../src/data/constants.js';
@@ -420,6 +420,21 @@ describe('lab work: measurement → waiting for supplier → arrived → fitted'
     expect(deletePayment(db, db.payments.at(-1).id).ok).toBe(true);
     expect(bal(db, owes.id)).toBe(b);
     expect(deletePayment(db, db.payments.find((x) => x.visitId).id).ok).toBe(false);
+  });
+  it('reception can add a lab item by hand; the doctor then sees it as ready to fit', () => {
+    const ok = { pid: 'p5', svcId: crown().id, teeth: '46', measuredOn: addDays(t, -3), lab: 'Precision Dental Lab', expected: addDays(t, 4) };
+    expect(Object.keys(labItemErrors(db, { pid: '', svcId: 'x', teeth: '99', measuredOn: addDays(t, 1), expected: '' })).sort()).toEqual(['measuredOn', 'pid', 'svcId', 'teeth']);
+    expect(labItemErrors(db, { ...ok, expected: addDays(t, -5) }).expected).toBeTruthy();
+    const visits = db.visits.length, due = bal(db, 'p5'), r = addLabItem(db, ok);
+    expect(r.ok).toBe(true);
+    expect(labFor(db, 'p5').at(-1)).toMatchObject({ status: 'waiting', name: 'PFM crown', teeth: ['46'], byHand: true });
+    expect([db.visits.length, bal(db, 'p5')]).toEqual([visits, due]); // nothing is charged
+    expect(addLabItem(db, ok).ok).toBe(false); // not twice
+    markArrived(db, r.id);
+    const cur = curQ(db); handOver(db, { pid: cur.pid, caseId: 'new', recs: [{ svcId: '', name: 'Consultation', teeth: '', price: '200' }] });
+    addToQueue(db, 'p5', 'Walk-in'); sendIn(db, tq(db).at(-1).id);
+    handOver(db, { pid: 'p5', caseId: 'new', recs: [{ svcId: crown().id, name: 'PFM crown', teeth: '46', price: '0', when: 'fit' }], close: true });
+    expect(db.labOrders.find((o) => o.id === r.id).status).toBe('fitted');
   });
   it('cancelling a lab item removes it from the lists', () => {
     const o = db.labOrders.find((x) => x.status === 'arrived');

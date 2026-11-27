@@ -17,6 +17,26 @@ export function createLabOrder(db, { pid, svc, teeth, caseId, itemId }) {
   db.labOrders.push(o);
   return o;
 }
+// Reception adds an item by hand, e.g. a measurement taken before the app was in use.
+// Nothing is charged here; billing stays with the visit and checkout. → { field: message }
+export function labItemErrors(db, f) {
+  const E = {};
+  if (!db.patients.some((p) => p.id === f.pid)) E.pid = 'Choose the patient';
+  if (!db.services.some((s) => s.id === f.svcId)) E.svcId = 'Choose what is being made';
+  const bad = (f.teeth || '').split(/[ ,]+/).filter(Boolean).find((n) => !/^([1-4][1-8]|[5-8][1-5])$/.test(n));
+  if (bad) E.teeth = `“${bad}” is not a tooth number`;
+  if (!f.measuredOn || f.measuredOn > today()) E.measuredOn = 'Use today or an earlier date';
+  if (f.expected && f.measuredOn && f.expected < f.measuredOn) E.expected = 'Cannot be before the measurement';
+  if (!E.pid && !E.svcId && labOpen(db).some((o) => o.pid === f.pid && o.svcId === f.svcId && o.teeth.join() === (f.teeth || '').split(/[ ,]+/).filter(Boolean).join())) E.svcId = 'This is already on the list for this patient';
+  return E;
+}
+export function addLabItem(db, f) {
+  if (Object.keys(labItemErrors(db, f)).length) return { ok: false, msg: 'Please check the highlighted fields' };
+  const s = db.services.find((x) => x.id === f.svcId);
+  const o = { id: 'l' + uid(), pid: f.pid, svcId: s.id, name: s.name, teeth: (f.teeth || '').split(/[ ,]+/).filter(Boolean), caseId: null, itemId: null, measuredOn: f.measuredOn, status: 'waiting', lab: (f.lab || '').trim(), expected: f.expected || '', cost: '', arrivedOn: '', fittedOn: '', byHand: true };
+  db.labOrders.push(o);
+  return { ok: true, id: o.id, msg: `${labText(o)} added for ${db.patients.find((p) => p.id === f.pid).name}` };
+}
 const find = (db, id) => db.labOrders.find((o) => o.id === id);
 // Supplier name, expected date and what the supplier charges (booked once as a Lab expense).
 export function setLabDetails(db, id, { lab, expected, cost }) {

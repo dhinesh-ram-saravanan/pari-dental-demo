@@ -97,6 +97,30 @@ test('lab work from measurement to fitting, across doctor and reception', async 
   await expect(page.locator('.li', { hasText: '· lab work' })).toContainText('₹1,800');
 });
 
+test('reception adds a lab item by hand', async ({ page }) => {
+  await fresh(page, '/#/lab');
+  await page.getByRole('button', { name: '+ Lab item' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Add a lab item' });
+  await dlg.getByRole('button', { name: 'Add to lab work' }).click();
+  await expect(dlg.getByText('Choose the patient')).toBeVisible();
+  await dlg.getByLabel('Find patient').fill('Fathima'); // one match picks her
+  await expect(dlg.getByRole('combobox', { name: 'Patient' })).toHaveValue('p5');
+  await dlg.getByLabel('What is being made').selectOption({ label: 'Complete denture' });
+  await dlg.getByLabel('Teeth').fill('99');
+  await dlg.getByRole('button', { name: 'Add to lab work' }).click();
+  await expect(dlg.getByText('“99” is not a tooth number')).toBeVisible();
+  await dlg.getByLabel('Teeth').fill('');
+  await expect(dlg.getByLabel('Supplier (lab)')).toHaveValue('Precision Dental Lab'); // last supplier used
+  await axe(page);
+  await dlg.getByRole('button', { name: 'Add to lab work' }).click();
+  await expect(toast(page)).toContainText('Complete denture added for Fathima Begum');
+  const mine = page.getByTestId('lab-waiting').locator('li', { hasText: 'Fathima Begum' });
+  await expect(mine).toContainText('Complete denture');
+  await expect(mine).toContainText('added at the desk');
+  await mine.getByRole('button', { name: 'Mark as arrived' }).click();
+  await expect(page.getByTestId('lab-arrived').locator('li', { hasText: 'Fathima Begum' }).getByRole('button', { name: 'Book fitting' })).toBeVisible();
+});
+
 test('mistakes can be undone: the doctor takes a visit back, reception reopens a checkout', async ({ page }) => {
   await fresh(page, '/#/doctor', 'doctor');
   await page.getByLabel('Remarks for the register (optional)').fill('first try');
