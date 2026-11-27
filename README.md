@@ -24,3 +24,7 @@ BASE_URL=https://example.vercel.app npx playwright test   # run the UAT suite ag
 - `src/pages/` – one file per screen
 - `tests/` – Vitest unit tests · `e2e/` – Playwright UAT journeys with axe checks
 - `reference/` – the approved prototype and a sample of the clinic's old Excel sheet
+
+## Deploy
+
+Pushing to `main` deploys to https://pari-dental-demo.vercel.app automatically (Vercel is connected to this repository).
