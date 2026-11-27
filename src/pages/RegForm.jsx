@@ -107,6 +107,7 @@ export default function RegForm({ initial, kiosk, self, onSave }) {
           <button type="button" className="btn sm ghost" onClick={() => { setR((x) => ({ ...x, sig: false, sigData: null })); setSigKey(sigKey + 1); }}>Clear</button>
         </div>
         {r.sig && !r.sigData && <p className="sm muted" style={{ margin: '6px 0 0' }}>Already signed on the original form.</p>}
+        <label style={{ marginTop: 10 }}>Cannot draw? Type your name here to sign<input value={r.typedSig || ''} autoComplete="off" placeholder="Your name" style={{ fontFamily: 'var(--font-display, serif)', fontStyle: 'italic', fontSize: 20 }} onChange={(e) => { set('typedSig', e.target.value); setE((x) => ({ ...x, sig: undefined })); }} /></label>
         {E.sig && <em className="errline">{E.sig}</em>}
         {!kiosk && !r.id && <button type="button" className={'chip' + (r.paperSig ? ' on' : '')} style={{ marginTop: 8 }} aria-pressed={!!r.paperSig} onClick={() => { set('paperSig', !r.paperSig); setE((x) => ({ ...x, sig: undefined })); }}>Signed on the paper form instead</button>}
         <div className="lbl" style={{ marginTop: 14 }}>Form filled by</div>

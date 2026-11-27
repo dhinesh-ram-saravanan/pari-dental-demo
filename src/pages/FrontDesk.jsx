@@ -4,7 +4,7 @@ import Notices from '../components/Notices.jsx';
 import { useDb, useUi, setUi, run, go } from '../data/store.js';
 import { ReceiptPrint } from '../components/Prints.jsx';
 import { P, todayRows, alertsOf, procOf, frontNotices, contactItems, findPatients, remind } from '../data/selectors.js';
-import { addToQueue, sendIn, coInit, removeFromQueue, backToWaiting, cancelBooking } from '../data/actions.js';
+import { addToQueue, sendIn, coInit, removeFromQueue, backToWaiting, cancelBooking, reopenCheckout } from '../data/actions.js';
 import { bal } from '../logic/balance.js';
 import { today, addDays, nowT, inr, sum, longDay } from '../logic/format.js';
 
@@ -45,7 +45,8 @@ export default function FrontDesk() {
       const pd = sum(db.payments.filter((x) => x.pid === p.id && x.date === today()), (x) => x.amount);
       act = <span className="sm muted">{pd ? inr(pd) + ' paid' : 'No payment'}</span>;
       const v = db.visits.find((x) => x.id === db.queue.find((q) => q.id === r.id)?.visitId) || db.visits.find((x) => x.pid === p.id && x.date === today());
-      items = [{ label: 'Book next visit', onClick: () => setUi({ book: { pid: p.id } }) }, ...(v ? [{ label: 'Print receipt', onClick: () => setUi({ print: <ReceiptPrint db={db} visit={v} /> }) }] : []), record(p)];
+      const reopen = { label: 'Reopen checkout to correct it', onClick: () => { if (window.confirm(`Reopen the checkout for ${p.name}? The payment and any booking made at checkout are removed so you can enter them again.`)) run((d) => reopenCheckout(d, r.id)); } };
+      items = [{ label: 'Book next visit', onClick: () => setUi({ book: { pid: p.id } }) }, ...(db.queue.find((q) => q.id === r.id)?.visitId ? [reopen] : []), ...(v ? [{ label: 'Print receipt', onClick: () => setUi({ print: <ReceiptPrint db={db} visit={v} /> }) }] : []), record(p)];
     }
     return (
       <li className="fd" key={r.k + r.id} data-status={r.st}>

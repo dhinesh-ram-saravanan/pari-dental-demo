@@ -28,10 +28,10 @@ export default function CheckoutSheet() {
   return (
     <Modal title={`${p.name} · checkout`} onClose={() => setUi({ co: null })}>
       {co.lines.map((l, i) => {
-        const s = svByName(db, l.name), diff = s && l.price !== null && s.price !== l.price;
+        const s = svByName(db, l.name), diff = s && !l.step && l.price !== null && s.price !== l.price;
         return (
           <div className="due" key={i}>
-            <span>{l.name}{l.teeth.length ? ' · ' + l.teeth.join(', ') : ''}{l.price === null ? <span className="badge warn"> enter price</span> : diff ? <span className="badge warn"> list {inr(s.price)}</span> : null}</span>
+            <span>{l.name}{l.teeth.length ? ' · ' + l.teeth.join(', ') : ''}{l.step ? <span className="sm muted"> · {l.step.toLowerCase()}</span> : null}{l.price === null ? <span className="badge warn"> enter price</span> : diff ? <span className="badge warn"> list {inr(s.price)}</span> : null}</span>
             <input type="number" min="0" step="1" inputMode="numeric" value={l.price ?? ''} placeholder={s?.price ? String(s.price) : '₹'} style={{ width: 100, textAlign: 'right' }} aria-label={`Price for ${l.name}`}
               onChange={(e) => set({ lines: co.lines.map((y, j) => (j === i ? { ...y, price: e.target.value === '' ? null : +e.target.value } : y)) })} />
           </div>
@@ -64,6 +64,7 @@ export default function CheckoutSheet() {
       )}
       {v.rx && <><div className="sec">Prescription</div><div className="row-actions"><div className="rx" style={{ flex: 1 }}>{v.rx}</div><button type="button" className="btn sm" onClick={() => setUi({ print: <RxPrint db={db} visit={v} /> })}>Print</button></div></>}
       <div className="sec">Next visit {v.suggest && <span style={{ textTransform: 'none', fontWeight: 500 }}>· doctor suggests {v.nextReason || 'review'} in {NEXTS.find((n) => n[0] === v.suggest)?.[1]}</span>}</div>
+      {co.lines.some((l) => l.step === 'Measurement taken') && <p className="labnote">Lab work has gone to the supplier. It is listed under Lab work; call the patient for fitting when it arrives.</p>}
       <div className="chips">{[['book', 'Book now'], ['remind', 'Remind later'], ['none', 'Not needed']].map(([k, l]) => chip(co.nextMode === k, l, () => set({ nextMode: k })))}</div>
       {co.nextMode !== 'none' && (
         <div className="fgrid3">

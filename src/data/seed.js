@@ -20,6 +20,8 @@ export function seed() {
     S('o', 'Ceramic braces package', 50000, ''), S('o', 'Self-ligating braces package', 60000, ''), S('o', 'Clear aligners package', 120000, ''),
     S('o', 'Monthly adjustment', 0, '', 'Wire changed, elastics advised.'), S('o', 'Removable appliance', 6000, ''), S('o', 'Debonding', 0, ''), S('o', 'Retainer', 4000, '')];
   const sv = (n) => services.find((s) => s.name === n);
+  // made by an outside lab: measurement first, fitting when it comes back
+  ['PFM crown', 'Zirconia crown', 'Removable partial denture', 'Complete denture', 'Clear aligners package', 'Removable appliance', 'Retainer'].forEach((n) => { sv(n).lab = true; });
   const NAMES = [['Mrs.', 'Lakshmi Ramesh', 'F'], ['Mr.', 'Arjun Selvam', 'M'], ['Mrs.', 'Meena Krishnan', 'F'], ['Mr.', 'Karthik Raja', 'M'], ['Mrs.', 'Fathima Begum', 'F'], ['Mr.', 'S. Manoharan', 'M'], ['Ms.', 'Priya Venkatesh', 'F'], ['Mr.', 'Ganesh Kumar', 'M'], ['Ms.', 'Divya Subramanian', 'F'], ['Mr.', 'Ravi Shankar', 'M'],
     ['Ms.', 'Kavya Murugan', 'F'], ['Mr.', 'Senthil Nathan', 'M'], ['Mrs.', 'Anitha Balaji', 'F'], ['Mr.', 'Harish Prabhu', 'M'], ['Mrs.', 'Revathi Sundaram', 'F'], ['Mr.', 'Mohammed Irfan', 'M'], ['Mrs.', 'Sangeetha Mohan', 'F'], ['Mr.', 'Vignesh Kumar', 'M'], ['Mrs.', 'Kavitha Ramesh', 'F'], ['Mr.', 'Balaji Venkat', 'M'],
     ['Ms.', 'Nandhini P', 'F'], ['Mr.', 'Ashok Rajan', 'M'], ['Mrs.', 'Gayathri Vasan', 'F'], ['Mr.', 'Prakash Anand', 'M'], ['Ms.', 'Lavanya R', 'F'], ['Master', 'Rohit Kannan', 'M'], ['Mrs.', 'Shalini K', 'F'], ['Mr.', 'Murali Dharan', 'M'], ['Ms.', 'Janani Sekar', 'F'], ['Mr.', 'Suresh Babu', 'M'],
@@ -135,9 +137,17 @@ export function seed() {
   I('Chlorhexidine mouthwash 0.2%', 'Medicines', 'bottle', 5, [[12, 300, 960, 15]]);
   invLog.push({ id: uid(), date: d(-1), itemId: inventory[0].id, type: 'out', qty: 4, note: 'Used in treatment' });
   const approvals = [{ id: uid(), svcId: sv('Scaling & polishing').id, name: 'Scaling & polishing', old: 1200, price: 1500, pid: 'p9', date: d(-1), status: 'pending' }];
-  const clinic = { name: 'Pari Dental Hospital', addr: 'No. 10, Municipal Building, Kamarajapuram, Chennai - 600 073', phone: '86 87 88 89 34', email: 'drnarasimman@hotmail.com', sig: null,
+  const clinic = { name: 'Pari Dental Hospital', addr: 'No. 10, Municipal Building, Kamarajapuram, Chennai - 600 073', phone: '86 87 88 89 34', email: 'drnarasimman@hotmail.com', sig: null, pin: '1234', rx: RX,
     template: 'Hello {name}, this is a reminder from {clinic} for your dental visit ({reason}) on {date}. Please call {phone} to confirm. Thank you.' };
-  const db = { seededOn: t, clinic, services, patients, cases, visits, payments, appointments, queue: q, charts, expenses, approvals, inventory, invLog, reports: [],
+  // lab work in progress: crowns measured at an earlier visit, in different stages
+  const labOrders = [];
+  cases.filter((c) => c.status === 'open' && !c.ortho).forEach((c) => {
+    const it = c.items.find((x) => !x.done && sv(x.name)?.lab);
+    if (!it || labOrders.length >= 3 || q.some((x) => x.pid === c.pid)) return;
+    const n = labOrders.length, lastSeen = visits.filter((v) => v.caseId === c.id).map((v) => v.date).sort().pop();
+    labOrders.push({ id: 'l' + uid(), pid: c.pid, svcId: it.svcId, name: it.name, teeth: it.teeth, caseId: c.id, itemId: it.id, measuredOn: [d(-8), d(-4), d(-10)][n] > lastSeen ? [d(-8), d(-4), d(-10)][n] : lastSeen, status: n === 2 ? 'arrived' : 'waiting', lab: 'Precision Dental Lab', expected: [d(-1), d(3), d(-2)][n], cost: '', arrivedOn: n === 2 ? d(-1) : '', fittedOn: '' });
+  });
+  const db = { seededOn: t, clinic, labOrders, services, patients, cases, visits, payments, appointments, queue: q, charts, expenses, approvals, inventory, invLog, reports: [],
     staff: [{ id: 'st1', name: DOCTOR, role: 'Doctor', phone: clinic.phone, active: true, since: '2010-01-01' }], notes: { dismissed: {}, snooze: {} }, nextReg: 6001 + NAMES.length + 1 };
   // one sample report
   const rp = patients.find((x) => visits.some((v) => v.pid === x.id && v.services.some((s) => /Extraction/.test(s.name))));

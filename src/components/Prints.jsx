@@ -28,7 +28,7 @@ export function RecordPrint({ db, p }) {
         <p style={{ margin: '2mm 0' }}>Women: {p.preg ? '☑' : '☐'} Pregnant &nbsp; {p.nurse ? '☑' : '☐'} Nursing a child</p>
         <Row a="Allergic to any medicines" b={p.allergy} /><Row a="Your Main Complaint" b={p.complaint} />
         <p style={{ fontSize: '9.5pt' }}>{DECL}</p>
-        <Row a="Patient Signature" b={p.sigData ? <img src={p.sigData} alt="Signature" style={{ height: '12mm', verticalAlign: 'middle' }} /> : p.sig ? '(signed electronically)' : ''} c="Date" d={fmtS(p.created)} />
+        <Row a="Patient Signature" b={p.sigData ? <img src={p.sigData} alt="Signature" style={{ height: '12mm', verticalAlign: 'middle' }} /> : p.typedSig ? <i>{p.typedSig} (typed)</i> : p.sig ? '(signed electronically)' : ''} c="Date" d={fmtS(p.created)} />
         <div style={{ borderTop: `1.5px solid ${GREEN}`, marginTop: '4mm', paddingTop: '3mm' }}>
           <b style={{ color: GREEN }}>On Examination</b>
           <div className="palm">{pal([18, 17, 16, 15, 14, 13, 12, 11])} | {pal([21, 22, 23, 24, 25, 26, 27, 28])}<br />{pal([48, 47, 46, 45, 44, 43, 42, 41])} | {pal([31, 32, 33, 34, 35, 36, 37, 38])}</div>
@@ -96,6 +96,7 @@ export function ReportDoc({ db, r }) {
   const rs = (n) => '- Rs ' + Number(n || 0).toLocaleString('en-IN');
   return (
     <div className="rdoc">
+      {r.letterhead && <div className="lhead"><b>{db.clinic.name.toUpperCase()}</b><br />{db.clinic.addr}<br />Mobile: {db.clinic.phone} · e-mail: {db.clinic.email}</div>}
       <div className="rd-date">{longDate(r.date)}</div>
       <h2>DENTAL TREATMENT REPORT</h2>
       <p className="c">To whomsoever it may concern</p><p className="c">(Reg.no: {p.reg})</p>

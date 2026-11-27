@@ -19,7 +19,7 @@ export function balances(db) {
 export const owing = (db) => { const m = balances(db); return db.patients.filter((p) => m[p.id] > 0); };
 export const totalDues = (db) => sum(Object.values(balances(db)), (b) => (b > 0 ? b : 0));
 
-const svcText = (v) => v.services.map((s) => (s.teeth?.length ? s.teeth.join(', ') + ' ' : '') + s.name).join(', ');
+const svcText = (v) => v.services.map((s) => (s.teeth?.length ? s.teeth.join(', ') + ' ' : '') + s.name + (s.step ? ` (${s.step.toLowerCase()})` : '')).join(', ');
 
 // The paper record sheet: Date · Treatment record · Payment · Balance, with a running balance.
 export function sheetRows(db, pid, extra) {
@@ -38,6 +38,7 @@ export function sheetRows(db, pid, extra) {
 export function priceApprovals(db, lines, pid, date) {
   const out = [];
   lines.forEach((l) => {
+    if (l.step) return; // measurement and fitting lines split one price over two visits
     const s = db.services.find((x) => x.name === l.name);
     const pending = (a) => a.svcId === s.id && a.status === 'pending';
     if (s && s.price !== l.price && !db.approvals.some(pending) && !out.some(pending))

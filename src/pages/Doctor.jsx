@@ -5,17 +5,25 @@ import { Segmented } from '../components/controls.jsx';
 import { Head, FormCard, SheetTable, VisitsList } from '../components/PatientBits.jsx';
 import { useDb, useUi, setUi, run, update, go } from '../data/store.js';
 import { P, SV, svByName, tq, curQ, todayRows, alertsOf, openCases, procOf, pendingAppr, itemText } from '../data/selectors.js';
-import { handOver } from '../data/actions.js';
+import { handOver, takeBack } from '../data/actions.js';
+import { labFor, labText } from '../logic/lab.js';
 import { ageOf } from '../logic/age.js';
 import { today, fmtD, nowT, minsAgo, inr, sum, uid, sortBy } from '../logic/format.js';
 import { MARKS, NEXTS, RX, ALLERGY_CLASH } from '../data/constants.js';
 
-const blankRec = (teeth = '') => ({ key: uid(), svcId: '', name: '', teeth, price: '', planItemId: null });
-const recFromItem = (db, x) => ({ key: uid(), svcId: x.svcId || svByName(db, x.name)?.id || 'other', name: x.name, teeth: x.teeth.join(', '), price: x.price ? String(x.price) : '', planItemId: x.id });
+const blankRec = (teeth = '') => ({ key: uid(), svcId: '', name: '', teeth, price: '', planItemId: null, when: 'done' });
+// Lab-made work starts as "measurement taken"; once an order exists for it, the next step is the fitting.
+const stepFor = (db, pid, s) => (!s?.lab ? 'done' : labFor(db, pid).some((o) => o.svcId === s.id) ? 'fit' : 'measure');
+const recFromItem = (db, x, pid) => {
+  const s = SV(db, x.svcId) || svByName(db, x.name), when = stepFor(db, pid, s);
+  return { key: uid(), svcId: s?.id || 'other', name: x.name, teeth: x.teeth.join(', '), price: when === 'fit' ? '0' : x.price ? String(x.price) : '', planItemId: x.id, when };
+};
 
 function newDraft(db, cur) {
-  const oc = openCases(db, cur.pid), nx = oc[0]?.items.find((x) => !x.done);
-  return { qid: cur.id, pid: cur.pid, teeth: [], caseId: oc[0]?.id || 'new', rx: '', remarks: '', notes: '', notesTouched: false, nextIn: '', nextReason: '', reasonTouched: false, close: null, recs: [nx ? recFromItem(db, nx) : blankRec()] };
+  const oc = openCases(db, cur.pid), here = labFor(db, cur.pid).find((o) => o.status === 'arrived');
+  // lab work that has arrived is what this visit is for
+  const nx = (here && oc.flatMap((c) => c.items).find((x) => x.id === here.itemId && !x.done)) || oc[0]?.items.find((x) => !x.done);
+  return { qid: cur.id, pid: cur.pid, teeth: [], caseId: oc[0]?.id || 'new', rx: '', remarks: '', notes: '', notesTouched: false, nextIn: '', nextReason: '', reasonTouched: false, close: null, milk: (ageOf(P(db, cur.pid)) ?? 99) < 13, recs: [nx ? recFromItem(db, nx, cur.pid) : blankRec()] };
 }
 
 function Peek({ db, pid, onClose }) {
@@ -39,20 +47,22 @@ function Consult({ db, cur, d }) {
   const cs = openCases(db, p.id), c = db.cases.find((x) => x.id === d.caseId), items = c ? c.items : [];
   const used = new Set(d.recs.map((r) => r.planItemId).filter(Boolean)), pending = items.filter((x) => !x.done && !used.has(x.id));
   // A plan stays open while anything is still planned or a next visit is asked for.
-  const closeIt = d.close ?? (pending.length === 0 && !d.nextIn);
+  const measuring = d.recs.some((r) => r.name && r.when === 'measure'), orders = labFor(db, p.id);
+  const closeIt = d.close ?? (pending.length === 0 && !d.nextIn && !d.recs.some((r) => r.name && (r.when === 'later' || r.when === 'measure')));
   const nextReason = d.reasonTouched ? d.nextReason : pending[0] ? itemText(pending[0]) : p.cat === 'o' ? 'Monthly adjustment' : 'Review';
   // Clinical notes start from each treatment's usual note; the doctor can change every word.
-  const notes = d.notesTouched ? d.notes : [...new Set(d.recs.map((r) => SV(db, r.svcId)?.note).filter(Boolean))].join(' ');
+  const notes = d.notesTouched ? d.notes : [...new Set(d.recs.filter((r) => r.when !== 'later' && r.when !== 'measure').map((r) => SV(db, r.svcId)?.note).filter(Boolean))].join(' ');
   const lastRx = db.visits.filter((v) => v.pid === p.id && v.rx).sort((a, b) => b.date.localeCompare(a.date))[0]?.rx;
   const allergy = [p.allergy, p.other].filter(Boolean).join(' '), clash = (text) => ALLERGY_CLASH.some(([a, m]) => a.test(allergy) && m.test(text));
   const addRx = (text) => { if (clash(text) && !window.confirm(`${p.name} is allergic to ${p.allergy}. Add “${text.split(',')[0]}” anyway?`)) return; set({ rx: (d.rx ? d.rx + '\n' : '') + text }); };
-  const filled = d.recs.filter((r) => r.name), noPrice = filled.filter((r) => r.price === '').length, tot = sum(filled, (r) => +r.price || 0);
+  const filled = d.recs.filter((r) => r.name && r.when !== 'later'), later = d.recs.filter((r) => r.name && r.when === 'later').length, noPrice = filled.filter((r) => r.price === '').length, tot = sum(filled, (r) => +r.price || 0);
   const setRec = (i, patch) => set({ recs: d.recs.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
   const pickSvc = (i, v) => {
     const s = v && v !== 'other' ? SV(db, v) : null, r = d.recs[i];
     // choosing something that is already planned picks up its teeth and price, and ticks the plan
     const plan = s && items.find((x) => !x.done && !used.has(x.id) && x.name === s.name);
-    setRec(i, { svcId: v, planItemId: plan?.id || null, name: s ? s.name : '', teeth: r.teeth || (plan ? plan.teeth.join(', ') : ''), price: plan?.price ? String(plan.price) : s ? (s.price ? String(s.price) : '') : r.price });
+    const when = r.when === 'later' ? 'later' : stepFor(db, p.id, s);
+    setRec(i, { svcId: v, planItemId: plan?.id || null, name: s ? s.name : '', when, teeth: r.teeth || (plan ? plan.teeth.join(', ') : ''), price: when === 'fit' ? '0' : plan?.price ? String(plan.price) : s ? (s.price ? String(s.price) : '') : r.price });
   };
   const opts = (cat) => db.services.filter((x) => x.cat === cat && x.active).map((x) => <option key={x.id} value={x.id}>{x.name}{x.price ? ' · ' + inr(x.price) : ''}</option>);
   // Marking keeps the teeth selected, so the same teeth can go straight into a treatment row.
@@ -62,18 +72,20 @@ function Consult({ db, cur, d }) {
     const tt = [...d.teeth].sort().join(', '), k = d.recs.findIndex((r) => !r.teeth && (!r.svcId || SV(db, r.svcId)?.marks || r.svcId === 'other'));
     set({ recs: k >= 0 ? d.recs.map((r, j) => (j === k ? { ...r, teeth: tt } : r)) : [...d.recs, blankRec(tt)], teeth: [] });
   };
-  const fromPlan = (it) => { const r = recFromItem(db, it), e = d.recs.findIndex((x) => !x.name); set({ recs: e >= 0 ? d.recs.map((x, j) => (j === e ? r : x)) : [...d.recs, r] }); };
+  const fromPlan = (it) => { const r = recFromItem(db, it, p.id), e = d.recs.findIndex((x) => !x.name); set({ recs: e >= 0 ? d.recs.map((x, j) => (j === e ? r : x)) : [...d.recs, r] }); };
   const save = () => { if (run((x) => handOver(x, { ...d, nextReason, notes, close: closeIt })).ok) setUi({ doc: null }); };
   return (
     <>
       <div className="inchair" data-testid="in-chair"><i />In your chair since {cur.inTime || cur.time} · token {cur.token} · sent in by reception</div>
       <Head title={`${p.title} ${p.name}`} sub={`${cur.source} · ${procOf(db, p.id)}`}><button type="button" className="btn ghost" onClick={() => setUi({ peek: p.id })}>Record sheet</button></Head>
       <FormCard p={p} />
+      {orders.map((o) => <p key={o.id} className={'labnote' + (o.status === 'arrived' ? ' in' : '')}><b>{labText(o)}</b> {o.status === 'arrived' ? `has arrived from the supplier (${fmtD(o.arrivedOn)}). Ready to fit.` : `is with the supplier${o.lab ? ', ' + o.lab : ''}, measured ${fmtD(o.measuredOn)}${o.expected ? ', expected ' + fmtD(o.expected) : ''}.`}</p>)}
       <div className="panel">
         <div className="ph"><h2>Examination</h2>
           {cs.length > 0 && <select style={{ width: 'auto' }} aria-label="Treatment plan" value={d.caseId} onChange={(e) => set({ caseId: e.target.value, close: null, reasonTouched: false, recs: d.recs.map((r) => ({ ...r, planItemId: null })) })}>{cs.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}<option value="new">+ New plan</option></select>}
         </div>
-        <ToothChart chart={db.charts[p.id]} selected={d.teeth} k={0.55} onToggle={(n) => set({ teeth: d.teeth.includes(n) ? d.teeth.filter((x) => x !== n) : [...d.teeth, n] })} />
+        <Segmented label="Teeth shown" value={d.milk ? 'milk' : 'adult'} options={[['adult', 'Adult teeth'], ['milk', 'Milk teeth']]} onChange={(v) => set({ milk: v === 'milk', teeth: [] })} />
+        <ToothChart chart={db.charts[p.id]} selected={d.teeth} k={d.milk ? 0.7 : 0.55} milk={d.milk} onToggle={(n) => set({ teeth: d.teeth.includes(n) ? d.teeth.filter((x) => x !== n) : [...d.teeth, n] })} />
         {d.teeth.length > 0 && (
           <div className="marks"><span className="sm muted">{d.teeth.join(', ')}:</span>
             {Object.entries(MARKS).map(([k, l]) => <button type="button" className="mk" key={k} onClick={() => mark(k)}><i style={{ background: `var(--t-${k})` }} />{l}</button>)}
@@ -89,6 +101,10 @@ function Consult({ db, cur, d }) {
                 <option value="">Choose treatment…</option><optgroup label="General">{opts('g')}</optgroup><optgroup label="Orthodontics">{opts('o')}</optgroup><option value="other">Other (type it)</option>
               </select>
               {r.svcId === 'other' && <input value={r.name} placeholder="Type the treatment" aria-label={`Treatment ${i + 1} name`} style={{ marginTop: 6 }} onChange={(e) => setRec(i, { name: e.target.value })} />}
+              {r.name && <select className="stepsel" aria-label={`Step for treatment ${i + 1}`} value={r.when || 'done'} onChange={(e) => setRec(i, { when: e.target.value, price: e.target.value === 'fit' && r.price === String(SV(db, r.svcId)?.price) ? '0' : r.price })}>
+                {SV(db, r.svcId)?.lab ? <><option value="measure">Measurement taken today (goes to the supplier)</option><option value="fit">Fitted today</option></> : <option value="done">Done today</option>}
+                <option value="later">Planned for a later visit</option>
+              </select>}
             </div>
             <input value={r.teeth} placeholder="Teeth" aria-label={`Teeth for treatment ${i + 1}`} onChange={(e) => setRec(i, { teeth: e.target.value })} />
             <input type="number" min="0" value={r.price} placeholder="Reception" aria-label={`Price for treatment ${i + 1} (optional)`} onChange={(e) => setRec(i, { price: e.target.value })} />
@@ -100,19 +116,20 @@ function Consult({ db, cur, d }) {
         <label style={{ marginTop: 12 }}>Clinical notes<textarea rows="2" value={notes} placeholder="Findings and what was done. Filled in from the treatments you choose." onChange={(e) => set({ notes: e.target.value, notesTouched: true })} /></label>
         <label>Remarks for the register (optional)<input value={d.remarks} placeholder="Shown in the treatment register" onChange={(e) => set({ remarks: e.target.value })} /></label>
         <div className="sec">Next visit</div>
+        {measuring && <p className="sm muted" style={{ margin: '-4px 0 8px' }}>Lab work goes to the supplier. Reception calls the patient when it arrives, so no date is needed now.</p>}
         <div className="chips" role="group" aria-label="Next visit">{NEXTS.map(([v, l]) => <button type="button" key={v} className={'chip' + (d.nextIn === v ? ' on' : '')} aria-pressed={d.nextIn === v} onClick={() => set({ nextIn: v })}>{l}</button>)}</div>
         {d.nextIn && <input value={nextReason} aria-label="Reason for next visit" placeholder="Reason, e.g. Review" style={{ marginBottom: 8 }} onChange={(e) => set({ nextReason: e.target.value, reasonTouched: true })} />}
         <div className="lbl" style={{ marginTop: 12 }}>This treatment plan is</div><Segmented label="This treatment plan is" value={closeIt ? 'done' : 'open'} options={[['open', 'Ongoing'], ['done', 'Completed']]} onChange={(v) => set({ close: v === 'done' })} />
         <details className="more" open={!!d.rx}><summary>Prescription{d.rx ? ' ✓' : ''}</summary>
           {p.allergy && <p className="warnline">Allergic to {p.allergy}</p>}
-          <div className="quick">{lastRx && <button type="button" className="rxchip" onClick={() => addRx(lastRx)}>+ Repeat last prescription</button>}{RX.map((r) => <button type="button" className="rxchip" key={r} onClick={() => addRx(r)}>+ {r.split(',')[0]}</button>)}</div>
+          <div className="quick">{lastRx && <button type="button" className="rxchip" onClick={() => addRx(lastRx)}>+ Repeat last prescription</button>}{(db.clinic.rx || RX).map((r) => <button type="button" className="rxchip" key={r} onClick={() => addRx(r)}>+ {r.split(',')[0]}</button>)}</div>
           <textarea rows="3" aria-label="Prescription" value={d.rx} onChange={(e) => set({ rx: e.target.value })} />
         </details>
         <details className="more"><summary>Previous visits</summary><VisitsList db={db} pid={p.id} n={5} /></details>
       </div>
       <div className="savebar">
         <div><b>{filled.length ? filled.map((r) => r.name).join(', ') : 'Choose what you did today'}</b>
-          <span>{filled.length ? (tot ? inr(tot) : '') + (noPrice ? `${tot ? ' + ' : ''}${noPrice} price${noPrice > 1 ? 's' : ''} for reception` : '') : ''}{d.nextIn ? ' · next in ' + NEXTS.find((n) => n[0] === d.nextIn)[1] : ''}</span></div>
+          <span>{filled.length ? (tot ? inr(tot) : '') + (noPrice ? `${tot ? ' + ' : ''}${noPrice} price${noPrice > 1 ? 's' : ''} for reception` : '') : ''}{later ? ` · ${later} planned for later` : ''}{d.nextIn ? ' · next in ' + NEXTS.find((n) => n[0] === d.nextIn)[1] : ''}</span></div>
         <button type="button" className="btn primary lg" onClick={save}>Hand over to reception</button>
       </div>
     </>
@@ -197,6 +214,9 @@ export default function Doctor() {
           <button type="button" aria-label={sort.dir > 0 ? 'Ascending, tap for descending' : 'Descending, tap for ascending'} onClick={() => setSort({ ...sort, dir: -sort.dir })}>{sort.dir > 0 ? '↑' : '↓'}</button>
         </div>
       </div>
+      {tq(db).filter((x) => x.status === 'checkout').map((x) => (
+        <p key={x.id} className="sm muted" style={{ margin: '0 0 6px' }}>Handed over to reception: <b style={{ color: 'var(--ink)' }}>{P(db, x.pid).name}</b>. <button type="button" className="linkbtn" onClick={() => { const r = run((dd) => takeBack(dd, x.id)); if (r.ok) setUi({ doc: r.draft }); }}>Take back to correct</button></p>
+      ))}
       {group('Waiting', 'waiting', 'No one is waiting.')}{group('Still to come', 'notyet', 'No more appointments today.')}
       {peek}
     </div>

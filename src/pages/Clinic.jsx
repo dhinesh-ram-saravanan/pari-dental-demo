@@ -18,7 +18,7 @@ function Prices({ db }) {
         <div key={c}><div className="sec">{c === 'g' ? 'General' : 'Orthodontics'}</div>
           <div className="list">{db.services.filter((s) => s.cat === c).map((s) => (
             <div className="li price" key={s.id}>
-              <div>{s.name}{s.byDoctor && <span className="badge pri"> added in treatment</span>}</div>
+              <div>{s.name}{s.byDoctor && <span className="badge pri"> added in treatment</span>} <button type="button" className={'pill lab' + (s.lab ? ' on' : '')} aria-pressed={!!s.lab} title="Made by an outside supplier: measurement first, fitting when it arrives" onClick={() => edit(s.id, { lab: !s.lab }, s.name + (s.lab ? ' no longer needs lab work' : ' is now lab work: measurement, then fitting'))}>Lab work</button></div>
               <input type="number" min="0" defaultValue={s.price} key={s.price} aria-label={`Price of ${s.name}`} onBlur={(e) => { if (e.target.value === '' || !(+e.target.value >= 0)) { e.target.value = s.price; return; } if (+e.target.value !== s.price) edit(s.id, { price: +e.target.value }, 'Price saved'); }} />
               <select aria-label={`${s.name} marks tooth as`} value={s.marks} onChange={(e) => edit(s.id, { marks: e.target.value })}><option value="">No chart mark</option>{Object.entries(MARKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
               <Switch on={s.active} label={`${s.name} is offered`} onChange={(v) => edit(s.id, { active: v }, s.name + (v ? ' is offered' : ' is hidden from the list'))} />
@@ -81,17 +81,20 @@ function Expenses({ db }) {
 }
 
 function Settings({ db }) {
-  const [f, setF] = useState({ name: db.clinic.name, phone: db.clinic.phone, addr: db.clinic.addr, email: db.clinic.email, template: db.clinic.template });
+  const [f, setF] = useState({ name: db.clinic.name, phone: db.clinic.phone, addr: db.clinic.addr, email: db.clinic.email, template: db.clinic.template, pin: db.clinic.pin || '', rxText: (db.clinic.rx || []).join('\n') });
   const sample = db.patients[0], unknown = (f.template.match(/\{\w+\}/g) || []).filter((t) => !['{name}', '{clinic}', '{reason}', '{date}', '{phone}'].includes(t));
   return (
     <>
-    <form onSubmit={(e) => { e.preventDefault(); update((d) => Object.assign(d.clinic, f)); toast('Saved'); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!/^\d{4}$/.test(f.pin)) return toast('The tablet PIN must be 4 digits'); const { rxText, ...rest } = f; update((d) => Object.assign(d.clinic, rest, { rx: rxText.split('\n').map((x) => x.trim()).filter(Boolean) })); toast('Saved'); }}>
       <div className="fgrid"><label>Clinic name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label><label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
         <label>Address (printed on forms)<input value={f.addr} onChange={(e) => setF({ ...f, addr: e.target.value })} /></label><label>Email<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label></div>
       <label>Reminder message<textarea rows="3" value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })} /></label>
       <p className="sm muted">Use {'{name}'}, {'{clinic}'}, {'{reason}'}, {'{date}'} and {'{phone}'}.</p>
       {unknown.length > 0 && <p className="warnline">{unknown.join(', ')} will not be filled in. Check the spelling.</p>}
       <p className="sm" style={{ background: 'var(--sunk)', padding: '10px 12px', borderRadius: 10 }}><span className="muted">Preview: </span>{remind({ clinic: f }, sample, today(), 'Review', '10:30')}</p>
+      <label>Prescription quick picks (one per line)<textarea rows="6" value={f.rxText} onChange={(e) => setF({ ...f, rxText: e.target.value })} /></label>
+      <label style={{ maxWidth: 260 }}>Tablet exit PIN (4 digits)<input inputMode="numeric" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })} /></label>
+      <p className="sm muted">Staff type this to leave the patient tablet screen. Demo only: it is stored in this browser, not secret.</p>
       <button className="btn primary">Save</button>
     </form>
     <div className="danger"><p className="sm muted" style={{ margin: '0 0 8px' }}>Demo only: puts back the sample clinic and removes everything entered.</p>

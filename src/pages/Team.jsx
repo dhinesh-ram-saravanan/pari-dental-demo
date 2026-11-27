@@ -20,9 +20,9 @@ export function TeamTable() {
         <table className="tbl">
           <thead><tr>{H('name', 'Name')}{H('role', 'Role')}{H('phone', 'Phone')}{H('seen', 'Patients handled', 'num')}{H('active', 'Active')}</tr></thead>
           <tbody>{list.map((s) => (
-            <tr key={s.id}><td><b>{s.name}</b></td>
+            <tr key={s.id}><td><input className="cellin" style={{ fontWeight: 700 }} aria-label={`Name of ${s.name}`} defaultValue={s.name} key={s.name} onBlur={(e) => { const n = e.target.value.trim(); if (!n || db.staff.some((x) => x.id !== s.id && x.name.toLowerCase() === n.toLowerCase())) { e.target.value = s.name; return; } if (n !== s.name) { update((d) => { d.visits.forEach((v) => { if (v.handled === s.name) v.handled = n; }); d.staff.find((x) => x.id === s.id).name = n; }); toast('Name saved'); } }} /></td>
               <td><select style={{ width: 'auto' }} aria-label={`Role of ${s.name}`} value={s.role} onChange={(e) => edit(s.id, { role: e.target.value }, 'Role saved')}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select></td>
-              <td className="sm">{s.phone || '–'}</td><td className="num">{handled(s)}</td>
+              <td className="sm"><input className="cellin" type="tel" inputMode="numeric" placeholder="Add" aria-label={`Phone of ${s.name}`} defaultValue={s.phone} key={s.phone} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (s.phone || '')) edit(s.id, { phone: v }, 'Phone saved'); }} /></td><td className="num">{handled(s)}</td>
               <td><Switch on={s.active} label={`${s.name} is active`} onChange={(v) => { if (!v && s.role === 'Doctor' && !db.staff.some((x) => x.id !== s.id && x.active && x.role === 'Doctor') && !window.confirm(`${s.name} is the only doctor. Mark as inactive anyway?`)) return; edit(s.id, { active: v }, s.name + (v ? ' is active' : ' is inactive')); }} /></td></tr>
           ))}</tbody>
         </table>

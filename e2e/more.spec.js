@@ -85,6 +85,9 @@ test('Tablet: a returning patient joins the queue with their mobile number', asy
   await expect(page.getByRole('heading', { name: 'Patient form' })).toBeVisible();
   await axe(page);
   await page.getByRole('button', { name: 'Staff: exit tablet mode' }).click();
+  await page.getByLabel('Staff PIN').fill('9999'); // patients cannot walk into the staff screens
+  await expect(toast(page)).toContainText('Wrong PIN');
+  await page.getByLabel('Staff PIN').fill('1234');
   await expect(page.getByRole('heading', { name: 'Front desk' })).toBeVisible();
   await expect(page.getByTestId('today-list').locator('li', { hasText: 'Saranya Devi' })).toHaveCount(1);
 });
@@ -174,7 +177,7 @@ test('Reception: QR code, notices, bookings (new patient, reschedule, cancel) an
   await sheet.getByRole('button', { name: 'Save' }).click();
   await expect(toast(page)).toContainText('Saved · Karthik Raja');
   await page.getByRole('link', { name: 'Team' }).click();
-  await expect(page.locator('tr', { hasText: 'Dr. Arun' }).locator('td.num')).toHaveText('1'); // patients handled
+  await expect(page.locator('tr', { has: page.getByLabel('Name of Dr. Arun') }).locator('td.num')).toHaveText('1'); // patients handled
 });
 
 test('Doctor: tooth numbers are checked, a typed treatment is saved, clinic settings and reset work', async ({ page }) => {
@@ -219,7 +222,7 @@ test('Doctor: tooth numbers are checked, a typed treatment is saved, clinic sett
   await expect(page.locator('.li', { hasText: 'Autoclave service' })).toContainText('₹1,800');
 
   await page.getByRole('radio', { name: 'Team' }).click();
-  await expect(page.locator('tr', { hasText: 'Dr. Narasimman' })).toBeVisible();
+  await expect(page.getByLabel('Name of Dr. Narasimman')).toBeVisible();
   await page.getByRole('radio', { name: 'Settings' }).click();
   await page.getByRole('textbox', { name: 'Phone', exact: true }).fill('044 2222 3333');
   await page.getByRole('button', { name: 'Save', exact: true }).click();

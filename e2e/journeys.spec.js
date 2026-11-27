@@ -12,7 +12,7 @@ test.describe('1 · Patient: QR form on a phone', () => {
   test('empty submit shows errors, a bad mobile is blocked, a valid form gets a token', async ({ page }) => {
     await fresh(page, '/#/form');
     await page.getByRole('button', { name: 'Submit' }).click();
-    for (const msg of ['Enter the full name', 'Choose one', 'Enter age or date of birth', 'Enter the address', 'Enter the mobile number', 'What brings you in?', 'Please tap “I agree”', 'Please sign'])
+    for (const msg of ['Enter the full name', 'Choose one', 'Enter age or date of birth', 'Enter the address', 'Enter the mobile number', 'What brings you in?', 'Please tap “I agree”', 'Please sign, or type your name'])
       await expect(page.getByText(msg, { exact: true })).toBeVisible();
     await expect(page.getByLabel('Full name')).toBeInViewport(); // scrolled to the first error
 
@@ -245,7 +245,7 @@ test('7 · Inventory: stock in creates an expense; record use warns on low stock
   await dlg.getByLabel('Total cost').fill('450');
   await dlg.getByLabel('Alert me when stock falls below').fill('3');
   await dlg.getByRole('button', { name: 'Add stock' }).click();
-  await expect(toast(page)).toContainText('Quantity must be a whole number above 0');
+  await expect(dlg.getByText('Quantity must be a whole number above 0')).toBeVisible(); // shown beside the field
   await dlg.getByLabel('Quantity').fill('10');
   await axe(page);
   await dlg.getByRole('button', { name: 'Add stock' }).click();

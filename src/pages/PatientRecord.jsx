@@ -4,7 +4,7 @@ import { Head, FormCard, SheetTable, VisitsList } from '../components/PatientBit
 import { RecordPrint } from '../components/Prints.jsx';
 import { useDb, useUi, setUi, run, go } from '../data/store.js';
 import { P, waLink, dueMsg } from '../data/selectors.js';
-import { addToQueue, payDue } from '../data/actions.js';
+import { addToQueue, payDue, deletePayment } from '../data/actions.js';
 import { bal } from '../logic/balance.js';
 import { inr } from '../logic/format.js';
 
@@ -27,7 +27,7 @@ export default function PatientRecord({ id }) {
       <FormCard p={p} />
       <div className="sec">Date · Treatment record · Payment · Balance</div>
       <div className="panel">
-        <SheetTable db={db} pid={p.id} />
+        <SheetTable db={db} pid={p.id} onRemovePayment={rec ? (r) => { if (window.confirm(`Remove this payment of ${inr(r.paid)}? Use this only for a wrong entry.`)) run((d) => deletePayment(d, r.id)); } : undefined} />
         <div className="due tot"><span>Balance</span><span data-testid="balance" style={b > 0 ? { color: 'var(--bad)' } : undefined}>{inr(b)}</span></div>
         {rec && b > 0 && (
           <div className="row-actions" style={{ marginTop: 8 }}>

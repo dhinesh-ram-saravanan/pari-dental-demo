@@ -12,7 +12,14 @@ const subscribe = (f) => { subs.add(f); return () => subs.delete(f); };
 
 let full = false; // the last save did not fit in browser storage
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); full = false; } catch { full = true; } };
-const read = () => { try { const s = JSON.parse(localStorage.getItem(KEY)); return s?.patients && s.queue ? s : null; } catch { return null; } };
+const LAB = ['PFM crown', 'Zirconia crown', 'Removable partial denture', 'Complete denture', 'Clear aligners package', 'Removable appliance', 'Retainer'];
+// Data saved by an earlier version gets the fields added since.
+function upgrade(s) {
+  if (!s.labOrders) { s.labOrders = []; s.services.forEach((x) => { if (LAB.includes(x.name)) x.lab = true; }); }
+  s.clinic.pin ??= '1234';
+  return s;
+}
+const read = () => { try { const s = JSON.parse(localStorage.getItem(KEY)); return s?.patients && s.queue ? upgrade(s) : null; } catch { return null; } };
 function load() {
   const s = read();
   // The sample day is built around "today". An untouched copy from an earlier day is re-seeded;

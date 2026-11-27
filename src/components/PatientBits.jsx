@@ -30,7 +30,7 @@ export function FormCard({ p }) {
 }
 
 // Date · Treatment record · Payment · Balance
-export function SheetTable({ db, pid, extra }) {
+export function SheetTable({ db, pid, extra, onRemovePayment }) {
   const rows = sheetRows(db, pid, extra);
   return (
     <div className="tw" tabIndex={0} role="region" aria-label="Treatment record">
@@ -39,7 +39,7 @@ export function SheetTable({ db, pid, extra }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.id || i} style={r.pending ? { background: 'var(--sunk)', fontWeight: 600 } : undefined}>
-              <td>{fmtS(r.date)}</td><td>{r.text}{r.charge ? <span className="muted"> ({inr(r.charge)})</span> : null}</td>
+              <td>{fmtS(r.date)}</td><td>{r.text}{r.charge ? <span className="muted"> ({inr(r.charge)})</span> : null}{onRemovePayment && !r.charge && r.paid && db.payments.some((x) => x.id === r.id && !x.visitId) ? <> <button type="button" className="linkbtn sm" onClick={() => onRemovePayment(r)}>Remove</button></> : null}</td>
               <td className="num">{r.paid ? inr(r.paid) : '–'}</td><td className="num" style={r.balance > 0 ? { color: 'var(--bad)' } : undefined}>{inr(r.balance)}</td>
             </tr>
           ))}

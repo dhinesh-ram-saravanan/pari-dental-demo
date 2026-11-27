@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { fresh, setRole, toast } from './helpers.js';
 
-const STAFF = [['/#/front-desk', 'reception'], ['/#/calendar', 'reception'], ['/#/register', 'reception'], ['/#/patients/treatment', 'reception'], ['/#/patients/info', 'reception'], ['/#/patients/p1', 'reception'], ['/#/inventory', 'reception'], ['/#/team', 'reception'], ['/#/reports', 'doctor'], ['/#/reports/new', 'doctor'], ['/#/doctor', 'doctor'], ['/#/overview', 'doctor'], ['/#/clinic', 'doctor']];
+const STAFF = [['/#/front-desk', 'reception'], ['/#/calendar', 'reception'], ['/#/register', 'reception'], ['/#/patients/treatment', 'reception'], ['/#/patients/info', 'reception'], ['/#/patients/p1', 'reception'], ['/#/inventory', 'reception'], ['/#/lab', 'reception'], ['/#/team', 'reception'], ['/#/reports', 'doctor'], ['/#/reports/new', 'doctor'], ['/#/doctor', 'doctor'], ['/#/overview', 'doctor'], ['/#/clinic', 'doctor']];
 
 for (const [w, h] of [[390, 844], [768, 1024]]) {
   test(`no sideways scrolling on any staff screen at ${w}px`, async ({ page }) => {

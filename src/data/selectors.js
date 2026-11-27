@@ -4,6 +4,7 @@ import { ageOf } from '../logic/age.js';
 import { bal, balOn, owing, totalDues } from '../logic/balance.js';
 import { dueFU } from '../logic/followups.js';
 import { invAlerts, invStatus } from '../logic/inventory.js';
+import { labToCall, labOverdue, labText } from '../logic/lab.js';
 import { DOCTOR } from './constants.js';
 
 export const P = (db, id) => db.patients.find((p) => p.id === id);
@@ -16,7 +17,7 @@ export const openCases = (db, pid) => db.cases.filter((c) => c.pid === pid && c.
 export const caseLine = (c) => `${c.title} · ${c.ortho ? 'month ' + Math.max(1, c.items.filter((x) => x.done && x.name === 'Monthly adjustment').length + 1) : `${c.items.filter((x) => x.done).length} of ${c.items.length} done`}`;
 export const pendingAppr = (db) => db.approvals.filter((a) => a.status === 'pending');
 export const treaters = (db) => db.staff.filter((s) => s.active && (s.role === 'Doctor' || s.role === 'Junior doctor'));
-export const itemText = (x) => x.name + (x.teeth?.length ? ' ' + x.teeth.join(',') : '');
+export const itemText = (x) => x.name + (x.teeth?.length ? ' ' + x.teeth.join(',') : '') + (x.step ? ` (${x.step.toLowerCase()})` : '');
 export const waLink = (p, msg) => `https://wa.me/91${(p.mobile || '').replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(msg)}`;
 // Contact actions for a ⋯ menu; none when the patient has no mobile on file (old imported records).
 export const contactItems = (p, msg, again = '') => (p.mobile
@@ -97,6 +98,10 @@ export function frontNotices(db) {
   if (fu.length) N.push({ k: 'fu:' + t, tone: 'info', text: `${fu.length} follow-up${s(fu.length)} to call today or overdue`, act: { label: 'Open calendar', do: 'go', arg: '/calendar' } });
   const tm = db.appointments.filter((a) => a.date === addDays(t, 1) && a.status === 'booked');
   if (tm.length) N.push({ k: 'tmr:' + t, tone: 'info', text: `${tm.length} booked for tomorrow. Send WhatsApp reminders.`, act: { label: 'See bookings', do: 'tomorrow' } });
+  const ready = labToCall(db);
+  if (ready.length) N.push({ k: 'labin:' + ready.map((o) => o.id).join(','), tone: 'pay', text: `Lab work arrived, call for fitting: ${ready.map((o) => `${P(db, o.pid).name} (${labText(o)})`).join(', ')}`, act: { label: 'Lab work', do: 'go', arg: '/lab' } });
+  const overdue = labOverdue(db);
+  if (overdue.length) N.push({ k: 'lablate:' + overdue.map((o) => o.id).join(','), tone: 'warn', text: `Lab work overdue from the supplier: ${overdue.map((o) => `${labText(o)} for ${P(db, o.pid).name}`).join(', ')}`, act: { label: 'Lab work', do: 'go', arg: '/lab' } });
   const inv = invAlerts(db);
   if (inv.length) N.push({ k: 'inv:' + inv.map((i) => i.id + invStatus(i)[1]).join(','), tone: 'warn', text: stockText(inv), act: { label: 'Inventory', do: 'go', arg: '/inventory' } });
   const ap = pendingAppr(db);
@@ -122,4 +127,5 @@ export const navCounts = (db) => ({
   '/doctor': tq(db).filter((x) => x.status === 'waiting').length,
   '/clinic': pendingAppr(db).length,
   '/inventory': invAlerts(db).length,
+  '/lab': labToCall(db).length + labOverdue(db).length,
 });

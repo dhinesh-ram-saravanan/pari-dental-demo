@@ -702,3 +702,9 @@ h1:focus{outline:none}
 .quickr{display:flex;gap:6px;flex-wrap:wrap;align-self:flex-end;padding-bottom:4px}
 @media(min-width:1001px){.repsplit{grid-template-columns:420px minmax(0,1fr)}}
 @media print{.rpage.wide .pt{border-bottom:1px solid #2e7d4f}.pt tr{break-inside:avoid}}
+.labnote{margin:10px 0;padding:10px 14px;border-radius:12px;background:var(--warn-soft);color:var(--ink);font-size:14px}
+.labnote.in{background:var(--ok-soft)}
+.stepsel{margin-top:6px;font-size:13px}
+.pill.lab{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);font:inherit;font-size:12px;padding:4px 10px;border-radius:999px}
+.pill.lab.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.lhead{text-align:center;color:#2e7d4f;font-size:10.5pt;line-height:1.5;border-bottom:1.5px solid #2e7d4f;padding-bottom:4mm;margin-bottom:8mm}.lhead b{font-size:16pt}

@@ -11,7 +11,12 @@ import { callLists, markCalled, moveBack, closeFU, dueFU } from '../src/logic/fo
 import { invStatus, invQty, useStock as takeStock, stockIn } from '../src/logic/inventory.js';
 import { kpiNumbers, kpis } from '../src/logic/kpi.js';
 import { addToQueue, bookAppt, submitBooking, sendIn, handOver, coInit, checkout, payDue, decideApproval, cancelBooking, removeFromQueue, backToWaiting, firstFree } from '../src/data/actions.js';
-import { curQ, tq, nextWaiting, registerRows, findPatients } from '../src/data/selectors.js';
+import { curQ, tq, nextWaiting, registerRows, findPatients, frontNotices } from '../src/data/selectors.js';
+import { labFor, labToCall, labOverdue, markArrived, setLabDetails, cancelLab } from '../src/logic/lab.js';
+import { packForm, unpackForm } from '../src/logic/handoff.js';
+import { takeBack, reopenCheckout, deletePayment } from '../src/data/actions.js';
+import { MED } from '../src/data/constants.js';
+import { stockInErrors } from '../src/logic/validation.js';
 
 let db;
 beforeEach(() => { db = seed(); });
@@ -322,6 +327,130 @@ describe('audit fixes', () => {
   it('nothing in the sample clinic is dated in the future', () => {
     expect(db.visits.filter((v) => v.date > t)).toEqual([]);
     expect(db.payments.filter((x) => x.date > t)).toEqual([]);
+  });
+});
+
+describe('lab work: measurement → waiting for supplier → arrived → fitted', () => {
+  const crown = () => db.services.find((s) => s.name === 'PFM crown');
+  const seePatient = (recs, extra = {}) => { const cur = curQ(db); const r = handOver(db, { pid: cur.pid, caseId: 'new', recs, close: false, ...extra }); return { cur, r }; };
+  const rec = (when, price = '4000') => ({ svcId: crown().id, name: 'PFM crown', teeth: '36', price, when });
+  it('the sample clinic has lab work in each stage, and reception is told', () => {
+    expect(db.labOrders.map((o) => o.status).sort()).toEqual(['arrived', 'waiting', 'waiting']);
+    expect(labOverdue(db)).toHaveLength(1);
+    expect(labToCall(db)).toHaveLength(1);
+    const texts = frontNotices(db).map((n) => n.text).join(' | ');
+    expect(texts).toMatch(/Lab work arrived, call for fitting/);
+    expect(texts).toMatch(/Lab work overdue from the supplier/);
+    expect(crown().lab).toBe(true);
+  });
+  it('recording "measurement taken" creates the lab item and keeps the plan open', () => {
+    const { cur } = seePatient([rec('measure')]);
+    const o = labFor(db, cur.pid).at(-1), v = db.visits.at(-1), c = db.cases.at(-1);
+    expect(o).toMatchObject({ status: 'waiting', name: 'PFM crown', teeth: ['36'], measuredOn: t });
+    expect(o.expected > t).toBe(true);
+    expect(v.services[0]).toMatchObject({ step: 'Measurement taken', price: 4000 });
+    expect(c.status).toBe('open');
+    expect(c.items[0].done).toBe(false);
+    expect(db.charts[cur.pid]?.['36']).toBeUndefined(); // no crown on the chart until it is fitted
+    expect(priceApprovals(db, [{ ...v.services[0], price: 1000 }], cur.pid, t)).toEqual([]); // split prices are not "changed prices"
+  });
+  it('supplier details are saved, the charge is booked once as a Lab expense, arrival is recorded', () => {
+    const { cur } = seePatient([rec('measure')]);
+    const o = labFor(db, cur.pid).at(-1), n = db.expenses.length;
+    setLabDetails(db, o.id, { lab: 'Precision Dental Lab', expected: addDays(t, 5), cost: '1800' });
+    setLabDetails(db, o.id, { lab: 'Precision Dental Lab', expected: addDays(t, 6), cost: '1800' });
+    expect(db.expenses.length).toBe(n + 1);
+    expect(db.expenses.at(-1)).toMatchObject({ category: 'Lab', amount: 1800, vendor: 'Precision Dental Lab' });
+    expect(markArrived(db, o.id).ok).toBe(true);
+    expect(markArrived(db, o.id).ok).toBe(false);
+    expect(labToCall(db).some((x) => x.id === o.id)).toBe(false); // still in today's queue (at checkout)
+    bookAppt(db, cur.pid, addDays(t, 2), '09:00', 'PFM crown 36 fitting');
+    expect(labToCall(db).some((x) => x.id === o.id)).toBe(false); // booked: nothing to chase
+  });
+  it('fitting closes the lab item, marks the chart and finishes the plan item', () => {
+    const { cur } = seePatient([rec('measure')]);
+    const o = labFor(db, cur.pid).at(-1), c = db.cases.at(-1);
+    markArrived(db, o.id);
+    checkout(db, { ...coInit(db, cur.id), paid: '2000' });
+    const owed = bal(db, cur.pid);
+    addToQueue(db, cur.pid, 'Walk-in'); sendIn(db, tq(db).at(-1).id);
+    handOver(db, { pid: cur.pid, caseId: c.id, recs: [{ ...rec('fit', '0'), planItemId: c.items[0].id }], close: true });
+    expect(o).toMatchObject({ status: 'fitted', fittedOn: t });
+    expect(c.items[0].done).toBe(true);
+    expect(c.status).toBe('closed');
+    expect(db.charts[cur.pid]['36']).toBe('crown');
+    expect(db.visits.at(-1).services[0]).toMatchObject({ step: 'Fitted', price: 0 });
+    expect(bal(db, cur.pid)).toBe(owed); // charged once, at the measurement visit
+    expect(labFor(db, cur.pid)).toEqual([]);
+  });
+  it('a treatment can be planned for later without being charged today', () => {
+    const { r, cur } = seePatient([{ svcId: '', name: 'Consultation', teeth: '', price: '200', when: 'done' }, rec('later')]);
+    expect(r.ok).toBe(true);
+    const v = db.visits.at(-1), c = db.cases.at(-1);
+    expect(v.services.map((s) => s.name)).toEqual(['Consultation']);
+    expect(c.items.map((x) => [x.name, x.done])).toEqual([['Consultation', true], ['PFM crown', false]]);
+    expect(labFor(db, cur.pid)).toEqual([]);
+    expect(handOver(db, { pid: 'p2', caseId: 'new', recs: [rec('later')] }).ok).toBe(false);
+  });
+  it('the doctor can take a visit back; everything it did is undone', () => {
+    const before = { cases: db.cases.length, visits: db.visits.length, lab: db.labOrders.length };
+    const { cur } = seePatient([rec('measure')], { rx: 'Paracetamol', remarks: 'r' });
+    const back = takeBack(db, cur.id);
+    expect(back.ok).toBe(true);
+    expect({ cases: db.cases.length, visits: db.visits.length, lab: db.labOrders.length }).toEqual(before);
+    expect(curQ(db).id).toBe(cur.id);
+    expect(back.draft).toMatchObject({ rx: 'Paracetamol', remarks: 'r', caseId: 'new' });
+    expect(back.draft.recs[0]).toMatchObject({ name: 'PFM crown', teeth: '36', price: '4000', when: 'measure' });
+    expect(takeBack(db, cur.id).ok).toBe(false);
+  });
+  it('reception can reopen a saved checkout; the payment and booking are undone', () => {
+    const { cur } = seePatient([{ svcId: '', name: 'Consultation', teeth: '', price: '200', when: 'done' }]);
+    const start = bal(db, cur.pid);
+    checkout(db, { ...coInit(db, cur.id), paid: '2000', nextMode: 'book', date: addDays(t, 12), time: '09:00', reason: 'Review' });
+    const appt = db.appointments.at(-1);
+    expect(reopenCheckout(db, cur.id).ok).toBe(true);
+    expect(bal(db, cur.pid)).toBe(start);
+    expect(appt.status).toBe('cancelled');
+    expect(db.queue.find((x) => x.id === cur.id).status).toBe('checkout');
+    expect(checkout(db, { ...coInit(db, cur.id), paid: '200' }).ok).toBe(true);
+  });
+  it('a wrong balance payment can be removed; visit payments cannot', () => {
+    const owes = db.patients.find((p) => bal(db, p.id) > 500), b = bal(db, owes.id);
+    payDue(db, owes.id, 500, 'Cash');
+    expect(deletePayment(db, db.payments.at(-1).id).ok).toBe(true);
+    expect(bal(db, owes.id)).toBe(b);
+    expect(deletePayment(db, db.payments.find((x) => x.visitId).id).ok).toBe(false);
+  });
+  it('cancelling a lab item removes it from the lists', () => {
+    const o = db.labOrders.find((x) => x.status === 'arrived');
+    cancelLab(db, o.id);
+    expect(labToCall(db)).toEqual([]);
+  });
+});
+
+describe('form sent from the patient’s own phone', () => {
+  it('survives the round trip through a link', () => {
+    const r = { ...valid(), name: 'Anbu Selvan', med: ['Diabetes'], allergy: 'Penicillin', address: '12, காந்தி தெரு, Selaiyur', preg: false };
+    const { form, error } = unpackForm(packForm(r), MED);
+    expect(error).toBeUndefined();
+    expect(form).toMatchObject({ name: 'Anbu Selvan', mobile: '9876543210', med: ['Diabetes'], allergy: 'Penicillin', address: '12, காந்தி தெரு, Selaiyur', consent: true, paperSig: true });
+    expect(packForm(r)).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+  it('rejects damaged, incomplete or made-up links', () => {
+    expect(unpackForm('not-a-form', MED).error).toMatch(/damaged/);
+    expect(unpackForm(packForm({ ...valid(), mobile: '123' }), MED).error).toMatch(/incomplete/);
+    const odd = unpackForm(packForm({ ...valid(), med: ['Diabetes', '<script>'], extra: 'x' }), MED).form;
+    expect(odd.med).toEqual(['Diabetes']);
+    expect(odd.extra).toBeUndefined();
+    expect(unpackForm(packForm({ ...valid(), sig: false, typedSig: '' }), MED).error).toMatch(/sign/);
+  });
+});
+
+describe('small rules', () => {
+  it('stock-in errors are per field; a typed name counts as a signature', () => {
+    expect(Object.keys(stockInErrors({ itemId: '', name: '', qty: '0', cost: '', min: '', date: addDays(t, 1), expiry: addDays(t, -1) })).sort()).toEqual(['cost', 'date', 'expiry', 'min', 'name', 'qty']);
+    expect(validateReg({ ...valid(), sig: false, typedSig: 'Anbu Selvan' })).toEqual({});
+    expect(savePatient(db, { ...valid(), sig: false, typedSig: 'Anbu Selvan' })).toMatchObject({ sig: true, typedSig: 'Anbu Selvan' });
   });
 });
 

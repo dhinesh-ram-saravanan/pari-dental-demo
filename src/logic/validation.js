@@ -49,7 +49,7 @@ export function validateReg(r) {
   if (!r.address.trim() || r.address.trim().length < 6) e.address = 'Enter the address';
   if (!r.complaint.trim() && !old) e.complaint = 'What brings you in?';
   if (!r.consent) e.consent = 'Please tap “I agree”';
-  if (!r.sig && !r.id && !r.paperSig) e.sig = 'Please sign';
+  if (!r.sig && !r.id && !r.paperSig && !(r.typedSig || '').trim()) e.sig = 'Please sign, or type your name';
   if (r.forOther) { if (!r.oName.trim()) e.oName = 'Your name'; if (!r.oRel.trim()) e.oRel = 'Relationship'; }
   return e;
 }
@@ -62,7 +62,7 @@ export const allocReg = (db) => db.nextReg++;
 
 // Creates or updates a patient from the form. Returns the patient.
 export function savePatient(db, r, { verified = true } = {}) {
-  const data = { title: r.title, name: r.name.trim(), sex: r.sex, age: r.age === '' || r.age == null ? null : +r.age, dob: r.dob, address: r.address, mobile: r.mobile, emerg: r.emergNo ? r.emergNo + (r.emergRel ? ' · ' + r.emergRel : '') : '', email: r.email, prof: r.prof, office: r.office, ref: r.ref, phys: r.phys, physPh: r.physPh, med: [...r.med], other: r.other, preg: r.sex === 'F' && r.preg, nurse: r.sex === 'F' && r.nurse, allergy: r.allergy, complaint: r.complaint, cat: r.cat, sig: !!r.sig || !!r.paperSig, sigData: r.sigData || null, forOther: r.forOther ? { name: r.oName, rel: r.oRel } : null };
+  const data = { title: r.title, name: r.name.trim(), sex: r.sex, age: r.age === '' || r.age == null ? null : +r.age, dob: r.dob, address: r.address, mobile: r.mobile, emerg: r.emergNo ? r.emergNo + (r.emergRel ? ' · ' + r.emergRel : '') : '', email: r.email, prof: r.prof, office: r.office, ref: r.ref, phys: r.phys, physPh: r.physPh, med: [...r.med], other: r.other, preg: r.sex === 'F' && r.preg, nurse: r.sex === 'F' && r.nurse, allergy: r.allergy, complaint: r.complaint, cat: r.cat, sig: !!r.sig || !!r.paperSig || !!(r.typedSig || '').trim(), sigData: r.sigData || null, typedSig: (r.typedSig || '').trim(), forOther: r.forOther ? { name: r.oName, rel: r.oRel } : null };
   if (r.id) { const p = db.patients.find((x) => x.id === r.id); Object.assign(p, data, { verified: true }); return p; }
   const dup = db.patients.find((p) => p.mobile === data.mobile && p.name.toLowerCase() === data.name.toLowerCase());
   // Same person filling the form again: take the new answers (a patient-filled form goes back to "to check").
@@ -82,12 +82,15 @@ export function validateBooking({ date, time, isNew, newName, newPhone }) {
   return E;
 }
 
-export function validateStockIn(f) {
-  const qty = +f.qty;
-  if (!f.itemId && !(f.name || '').trim()) return 'Enter the item name';
-  if (!(Number.isInteger(qty) && qty > 0) || f.qty === '') return 'Quantity must be a whole number above 0';
-  if (f.cost === '' || !(+f.cost >= 0)) return 'Enter the total cost (0 if free)';
-  if (f.expiry && f.expiry < today()) return 'That expiry date has already passed';
-  if (f.min === '' || !(+f.min >= 0)) return 'Enter the stock level to be alerted at';
-  return '';
+// → { field: message }
+export function stockInErrors(f) {
+  const E = {}, qty = +f.qty;
+  if (!f.itemId && !(f.name || '').trim()) E.name = 'Enter the item name';
+  if (!(Number.isInteger(qty) && qty > 0) || f.qty === '') E.qty = 'Quantity must be a whole number above 0';
+  if (f.cost === '' || !(+f.cost >= 0)) E.cost = 'Enter the total cost (0 if free)';
+  if (f.date && f.date > today()) E.date = 'The purchase date cannot be in the future';
+  if (f.expiry && f.expiry < today()) E.expiry = 'That expiry date has already passed';
+  if (f.min === '' || !(+f.min >= 0)) E.min = 'Enter the stock level to be alerted at';
+  return E;
 }
+export const validateStockIn = (f) => Object.values(stockInErrors(f))[0] || '';

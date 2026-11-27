@@ -4,7 +4,7 @@ import { SortHeader, Field } from '../components/controls.jsx';
 import { Head } from '../components/PatientBits.jsx';
 import { useDb, update, toast } from '../data/store.js';
 import { invQty, nearExp, invStatus, useStock as takeStock, stockIn } from '../logic/inventory.js';
-import { validateStockIn } from '../logic/validation.js';
+import { stockInErrors } from '../logic/validation.js';
 import { today, fmtD, inr, sortBy, uid } from '../logic/format.js';
 import { INV_CATS } from '../data/constants.js';
 
@@ -16,7 +16,8 @@ const COLS = [['name', 'Item'], ['cat', 'Category'], ['qty', 'In stock', 'num'],
 function StockIn({ db, itemId, onClose }) {
   const it0 = db.inventory.find((i) => i.id === itemId);
   const [f, setF] = useState({ itemId: itemId || '', name: '', cat: INV_CATS[0], unit: '', qty: '', cost: '', vendor: it0?.batches.at(-1)?.vendor || '', date: today(), expiry: '', min: it0 ? String(it0.min) : '' });
-  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const [E, setE] = useState({});
+  const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setE((e) => ({ ...e, [k]: undefined })); };
   // Picking an item fills in its usual vendor and alert level; a new item starts clean.
   const pickItem = (id) => { const it = db.inventory.find((i) => i.id === id); setF((x) => ({ ...x, itemId: id, vendor: it?.batches.at(-1)?.vendor || '', min: it ? String(it.min) : '' })); };
   const same = !f.itemId && db.inventory.find((i) => i.name.toLowerCase() === f.name.trim().toLowerCase());
@@ -24,9 +25,9 @@ function StockIn({ db, itemId, onClose }) {
   const submit = (e) => {
     e.preventDefault();
     if (same) return pickItem(same.id); // typed the name of an item that already exists
-    if (f.date > today()) return toast('The purchase date cannot be in the future');
-    const err = validateStockIn(f);
-    if (err) return toast(err);
+    const errs = stockInErrors(f);
+    setE(errs);
+    if (Object.keys(errs).length) return toast('Please check the highlighted fields');
     const it = update((d) => stockIn(d, f));
     toast(`${f.qty} ${it.unit} of ${it.name} added · ${inr(+f.cost)} added to expenses`); onClose();
   };
@@ -35,21 +36,21 @@ function StockIn({ db, itemId, onClose }) {
       <form onSubmit={submit} noValidate>
         <Field label="Item"><select value={f.itemId} onChange={(e) => pickItem(e.target.value)}><option value="">+ New item</option>{db.inventory.map((i) => <option key={i.id} value={i.id}>{i.name} ({invQty(i)} {i.unit})</option>)}</select></Field>
         {!f.itemId && <div className="fgrid3">
-          <Field label="Item name" req hint={same ? `Already in stock as “${same.name}”. Add stock will use it.` : undefined}><input value={f.name} onChange={(e) => set('name', e.target.value)} /></Field>
+          <Field label="Item name" req error={E.name} hint={same ? `Already in stock as “${same.name}”. Add stock will use it.` : undefined}><input value={f.name} onChange={(e) => set('name', e.target.value)} /></Field>
           <Field label="Category"><select value={f.cat} onChange={(e) => set('cat', e.target.value)}>{INV_CATS.map((c) => <option key={c}>{c}</option>)}</select></Field>
           <Field label="Unit"><input value={f.unit} list="dl-unit" placeholder="box, pack, syringe" onChange={(e) => set('unit', e.target.value)} /></Field>
         </div>}
         <div className="fgrid3">
-          <Field label="Quantity" req><input type="number" min="1" step="1" inputMode="numeric" value={f.qty} onChange={(e) => set('qty', e.target.value)} /></Field>
-          <Field label="Total cost (₹)" req><input type="number" min="0" value={f.cost} onChange={(e) => set('cost', e.target.value)} /></Field>
+          <Field label="Quantity" req error={E.qty}><input type="number" min="1" step="1" inputMode="numeric" value={f.qty} onChange={(e) => set('qty', e.target.value)} /></Field>
+          <Field label="Total cost (₹)" req error={E.cost}><input type="number" min="0" value={f.cost} onChange={(e) => set('cost', e.target.value)} /></Field>
           <Field label="Vendor"><input value={f.vendor} list="dl-vendor" onChange={(e) => set('vendor', e.target.value)} /></Field>
           <datalist id="dl-vendor">{uniq((i) => i.batches.map((b) => b.vendor)).map((x) => <option key={x} value={x} />)}</datalist><datalist id="dl-unit">{uniq((i) => [i.unit]).map((x) => <option key={x} value={x} />)}</datalist>
         </div>
         <div className="fgrid3">
-          <Field label="Purchase date"><input type="date" max={today()} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
-          <Field label="Expiry date" hint="Leave blank if it does not expire"><input type="date" min={today()} value={f.expiry} onChange={(e) => set('expiry', e.target.value)} /></Field>
+          <Field label="Purchase date" error={E.date}><input type="date" max={today()} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
+          <Field label="Expiry date" error={E.expiry} hint="Leave blank if it does not expire"><input type="date" min={today()} value={f.expiry} onChange={(e) => set('expiry', e.target.value)} /></Field>
         </div>
-        <Field label="Alert me when stock falls below" req><input type="number" min="0" value={f.min} placeholder="e.g. 2" onChange={(e) => set('min', e.target.value)} /></Field>
+        <Field label="Alert me when stock falls below" req error={E.min}><input type="number" min="0" value={f.min} placeholder="e.g. 2" onChange={(e) => set('min', e.target.value)} /></Field>
         <p className="sm muted">The cost is added to this month’s expenses.</p>
         <button className="btn primary">Add stock</button>
       </form>

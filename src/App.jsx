@@ -12,6 +12,8 @@ import TreatmentRegister from './pages/TreatmentRegister.jsx';
 import PatientInfo from './pages/PatientInfo.jsx';
 import PatientRecord from './pages/PatientRecord.jsx';
 import Inventory from './pages/Inventory.jsx';
+import LabWork from './pages/LabWork.jsx';
+import FormIn from './pages/FormIn.jsx';
 import { Reports, ReportEdit } from './pages/Reports.jsx';
 import Team from './pages/Team.jsx';
 import Clinic from './pages/Clinic.jsx';
@@ -19,10 +21,10 @@ import QrModal from './pages/QrModal.jsx';
 import BookModal from './pages/BookModal.jsx';
 import CheckoutSheet from './pages/CheckoutSheet.jsx';
 
-const LABELS = { '/front-desk': 'Front desk', '/calendar': 'Calendar', '/doctor': 'Today', '/overview': 'Overview', '/patients/treatment': 'Treatment register', '/patients/info': 'Patient information', '/inventory': 'Inventory', '/reports': 'Reports', '/team': 'Team', '/clinic': 'Clinic' };
+const LABELS = { '/front-desk': 'Front desk', '/calendar': 'Calendar', '/doctor': 'Today', '/overview': 'Overview', '/patients/treatment': 'Treatment register', '/patients/info': 'Patient information', '/inventory': 'Inventory', '/lab': 'Lab work', '/reports': 'Reports', '/team': 'Team', '/clinic': 'Clinic' };
 const NAV = {
-  reception: ['/front-desk', '/calendar', '#Patients', '/patients/treatment', '/patients/info', '#Clinic', '/inventory', '/reports', '/team'],
-  doctor: ['/doctor', '/overview', '#Patients', '/patients/treatment', '/patients/info', '#Clinic', '/reports', '/inventory', '/clinic'],
+  reception: ['/front-desk', '/calendar', '/lab', '#Patients', '/patients/treatment', '/patients/info', '#Clinic', '/inventory', '/reports', '/team'],
+  doctor: ['/doctor', '/overview', '#Patients', '/patients/treatment', '/patients/info', '#Clinic', '/lab', '/reports', '/inventory', '/clinic'],
 };
 const HOME = { reception: '/front-desk', doctor: '/doctor' };
 
@@ -52,6 +54,8 @@ function page(route) {
   if (a === 'overview') return <Overview />;
   if (a === 'patients') return b === 'treatment' ? <TreatmentRegister /> : b === 'info' || !b ? <PatientInfo /> : <PatientRecord id={b} key={b} />;
   if (a === 'inventory') return <Inventory />;
+  if (a === 'lab') return <LabWork />;
+  if (a === 'form-in' && b) return <FormIn code={b} key={b} />;
   if (a === 'reports') return b ? <ReportEdit id={b} key={b} /> : <Reports />;
   if (a === 'team') return <Team />;
   if (a === 'clinic') return <Clinic />;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import SignaturePad from '../components/SignaturePad.jsx';
-import { SortHeader, Segmented } from '../components/controls.jsx';
+import { SortHeader, Segmented, Switch } from '../components/controls.jsx';
 import { Head } from '../components/PatientBits.jsx';
 import { ReportDoc } from '../components/Prints.jsx';
 import { useDb, getDb, useUi, update, setUi, toast, go } from '../data/store.js';
@@ -84,6 +84,7 @@ export function ReportEdit({ id }) {
               ))}
               <button type="button" className="btn sm ghost" style={{ alignSelf: 'flex-start' }} onClick={() => set({ lines: [...r.lines, { name: '', amount: 0 }] })}>+ Add line</button>
               <p className="sm" style={{ margin: '8px 0 0' }}>Total <b>{inr(total(r))}</b></p>
+              <div className="row-actions" style={{ marginTop: 16 }}><Switch on={!!r.letterhead} label="Print the clinic letterhead" onChange={(v) => set({ letterhead: v })} /><span className="sm">Print the clinic name and address at the top <span className="muted">(off for pre-printed paper)</span></span></div>
               <div className="lbl" style={{ marginTop: 16 }}>Digital signature</div>
               <div style={{ marginBottom: 8 }}><Segmented label="Signature" value={r.sigMode} options={[...(db.clinic.sig ? [['saved', 'Saved signature']] : []), ['draw', 'Draw'], ['upload', 'Upload image'], ['none', 'None']]} onChange={setMode} /></div>
               {r.sigMode === 'draw' && <>

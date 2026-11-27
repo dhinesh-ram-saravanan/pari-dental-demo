@@ -4,6 +4,7 @@ import { useDb, update, toast, go } from '../data/store.js';
 import { tq } from '../data/selectors.js';
 import { addToQueue } from '../data/actions.js';
 import { emptyP, savePatient, mobileDigits, MOBILE } from '../logic/validation.js';
+import { packForm } from '../logic/handoff.js';
 import { today, fmtD } from '../logic/format.js';
 
 // Patient-facing: the tablet at the desk (#/tablet) and the phone form behind the QR code (#/form).
@@ -11,14 +12,19 @@ export default function Kiosk({ qr }) {
   const db = useDb();
   const [k, setK] = useState({ step: qr ? 'form' : 'start', mobile: '' });
   // The phone form behind the QR code has no way into the staff screens.
-  const exit = qr ? null : <button type="button" className="kexit" onClick={() => go('/front-desk')}>Staff: exit tablet mode</button>;
+  const [pin, setPin] = useState(null); // null = not asked yet
+  // Staff type the PIN from Clinic › Settings to leave the tablet screen.
+  const exit = qr ? null : pin === null
+    ? <button type="button" className="kexit" onClick={() => setPin('')}>Staff: exit tablet mode</button>
+    : <label className="kexit" style={{ textDecoration: 'none' }}>Staff PIN <input type="password" inputMode="numeric" autoComplete="off" aria-label="Staff PIN" autoFocus value={pin} style={{ width: 110, display: 'inline-block', marginLeft: 8 }}
+        onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 4); if (v === (db.clinic.pin || '1234')) go('/front-desk'); else { setPin(v); if (v.length === 4) { toast('Wrong PIN'); setPin(''); } } }} /></label>;
   const restart = () => setK({ step: 'start', mobile: '' });
   // The desk tablet goes back to the welcome screen for the next patient.
   useEffect(() => { if (qr || k.step !== 'done') return; const t = setTimeout(restart, 15000); return () => clearTimeout(t); }, [qr, k.step]);
-  const queue = (pid, name) => {
+  const queue = (pid, name, link) => {
     const r = update((d) => addToQueue(d, pid, qr ? 'QR' : 'Tablet'));
     const token = r.token || tq(db).find((x) => x.pid === pid && x.status !== 'done')?.token || '–';
-    setK({ step: 'done', token, name: name.split(' ')[0] });
+    setK({ step: 'done', token, name: name.split(' ')[0], link });
     window.scrollTo(0, 0);
   };
   if (k.step === 'start') return (
@@ -48,13 +54,17 @@ export default function Kiosk({ qr }) {
   );
   if (k.step === 'form') return (
     <div className="kiosk" style={{ maxWidth: 760 }}><h1>Patient form</h1><p className="sub">{db.clinic.name} · {fmtD(today())}</p>
-      <RegForm kiosk self={qr} initial={{ ...emptyP(), mobile: k.mobile }} onSave={(r) => { const p = update((d) => savePatient(d, r, { verified: false })); queue(p.id, p.name); }} />{exit}
+      <RegForm kiosk self={qr} initial={{ ...emptyP(), mobile: k.mobile }} onSave={(r) => { const p = update((d) => savePatient(d, r, { verified: false })); queue(p.id, p.name, location.href.split('#')[0] + '#/form-in/' + packForm(r)); }} />{exit}
     </div>
   );
   return (
     <div className="kiosk kdone"><p className="sub">Your token number</p><div className="ktok" data-testid="token">{k.token}</div>
       <h1 style={{ fontSize: 28 }}>Please take a seat, {k.name}</h1><p className="sub">The doctor will call you in turn.{qr ? ' You can close this page now.' : ''}</p>
-      {!qr && <button type="button" className="btn lg" style={{ marginTop: 18 }} onClick={restart}>Next patient</button>}{exit}
+      {!qr && <button type="button" className="btn lg" style={{ marginTop: 18 }} onClick={restart}>Next patient</button>}
+      {qr && k.link && <div className="panel" style={{ marginTop: 22, textAlign: 'left' }}>
+        <p className="sm" style={{ margin: '0 0 10px' }}><b>Filled this on your own phone?</b> Send it to reception so they have your details at the desk.</p>
+        <a className="btn wa" target="_blank" rel="noopener noreferrer" href={`https://wa.me/91${db.clinic.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(`Patient form from ${k.name}: ${k.link}`)}`}>Send my form on WhatsApp</a>
+      </div>}{exit}
     </div>
   );
 }

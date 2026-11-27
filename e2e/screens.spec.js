@@ -5,7 +5,7 @@ import { fresh, axe } from './helpers.js';
 const PAGES = [
   ['front-desk', '/#/front-desk', 'reception'], ['calendar', '/#/calendar', 'reception'], ['register', '/#/register', 'reception'],
   ['doctor-consult', '/#/doctor', 'doctor'], ['overview', '/#/overview', 'doctor'], ['treatment-register', '/#/patients/treatment', 'reception'],
-  ['patient-info', '/#/patients/info', 'reception'], ['patient-record', '/#/patients/p1', 'reception'], ['inventory', '/#/inventory', 'reception'],
+  ['patient-info', '/#/patients/info', 'reception'], ['patient-record', '/#/patients/p1', 'reception'], ['inventory', '/#/inventory', 'reception'], ['lab', '/#/lab', 'reception'],
   ['reports', '/#/reports', 'doctor'], ['report-edit', '/#/reports/new', 'doctor'], ['team', '/#/team', 'reception'], ['clinic', '/#/clinic', 'doctor'], ['tablet', '/#/tablet', 'reception'],
 ];
 const SIZES = { desktop: { width: 1440, height: 900 }, tablet: { width: 1180, height: 820 } };
