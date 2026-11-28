@@ -52,7 +52,7 @@ export function setLabDetails(db, id, { lab, expected, cost }) {
 export function markArrived(db, id) {
   const o = find(db, id);
   if (!o || o.status !== 'waiting') return { ok: false, msg: 'That lab item was changed on another screen' };
-  Object.assign(o, { status: 'arrived', arrivedOn: today() });
+  Object.assign(o, { status: 'arrived', arrivedOn: today(), calledOn: '' });
   return { ok: true, msg: `${labText(o)} marked as arrived. Call the patient for fitting.` };
 }
 export function backToWaitingLab(db, id) { const o = find(db, id); if (o?.status === 'arrived') Object.assign(o, { status: 'waiting', arrivedOn: '' }); return { ok: !!o }; }

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import Menu from '../components/Menu.jsx';
 import { cancelAppt } from './FrontDesk.jsx';
-import { useDb, useUi, setUi, run, update, toast } from '../data/store.js';
+import { useDb, useUi, setUi, run, update, toast, go } from '../data/store.js';
 import { P, contactItems, remind } from '../data/selectors.js';
 import { addToQueue } from '../data/actions.js';
-import { callLists, markCalled, moveBack, closeFU } from '../logic/followups.js';
+import { callEntries, entryCalled, entryClose } from '../logic/followups.js';
 import { today, addDays, fmtS } from '../logic/format.js';
 
 const ST = { 'checked-in': ['s-wt', 'Arrived'], visited: ['s-ok', 'Seen'] };
@@ -16,20 +16,24 @@ export default function Calendar() {
   const day = ui.calDay || days[0]; // earlier days can be opened to see who did not come
   const strip = days.includes(day) ? days : [...Array(7)].map((_, i) => addDays(day, i));
   const appts = db.appointments.filter((a) => a.date === day && a.status !== 'cancelled').sort((a, b) => a.time.localeCompare(b.time));
-  const { toCall, called } = callLists(db);
+  const { toCall, called } = callEntries(db);
   const shift = (n) => { const s = addDays(strip[0], n); setWs(s); setUi({ calDay: s }); };
-  const fuRow = (v, isCalled) => {
-    const p = P(db, v.pid), od = v.nextVisit < t, dm = (d) => fmtS(d).slice(0, 5), msg = remind(db, p, v.nextVisit, v.nextReason);
-    const closeIt = { label: 'No visit needed', onClick: () => { update((d) => closeFU(d, v.id)); toast('Removed from follow-ups'); } };
+  // One row per patient to ring: lab work arrived, a missed booking, or a follow-up the doctor asked for.
+  const fuRow = (e, isCalled) => {
+    const p = P(db, e.pid), od = e.kind !== 'lab' && e.due < t, dm = (d) => fmtS(d).slice(0, 5);
+    const msg = e.kind === 'lab' ? `Hello ${p.name}, your ${e.book.replace(' fitting', '').toLowerCase()} has arrived at ${db.clinic.name}. Please call ${db.clinic.phone} to fix a time for fitting. Thank you.` : remind(db, p, e.kind === 'missed' ? t : e.due, e.book);
+    const closeIt = e.kind === 'lab' ? { label: 'Open lab work', onClick: () => go('/lab') } : { label: 'No visit needed', onClick: () => { update((d) => entryClose(d, e)); toast('Removed from the call list'); } };
+    // a missed booking is moved to a new slot; the others get a fresh booking with the reason filled in
+    const book = () => setUi({ book: e.kind === 'missed' ? { resched: e.id } : { pid: p.id, reason: e.book } });
     return (
-      <li className="fd" key={v.id}>
-        <span className={'tm' + (od && !isCalled ? ' lt' : '')}>{isCalled ? (v.calledOn ? dm(v.calledOn) : '–') : od ? 'Overdue' : v.nextVisit === t ? 'Today' : dm(v.nextVisit)}{!isCalled && od && <small>{dm(v.nextVisit)}</small>}{isCalled && <small>called</small>}</span>
-        <span className="who2"><b>{p.name}</b> <span className="rs">{v.nextReason || 'Check-up'}</span></span><span />
+      <li className="fd" key={e.key} data-kind={e.kind}>
+        <span className={'tm' + (od && !isCalled ? ' lt' : '')}>{isCalled ? dm(e.calledOn) : e.kind === 'lab' ? 'Lab' : e.kind === 'missed' ? 'Missed' : od ? 'Overdue' : e.due === t ? 'Today' : dm(e.due)}{!isCalled && (od || e.kind === 'lab') && <small>{e.kind === 'lab' ? 'arrived' : dm(e.due)}</small>}{isCalled && <small>called</small>}</span>
+        <span className="who2"><b>{p.name}</b> <span className="rs">{e.reason}</span></span><span />
         <span className="acts">
-          <button type="button" className={'btn sm' + (isCalled ? ' primary' : '')} onClick={() => setUi({ book: { pid: p.id, reason: v.nextReason } })}>Book</button>
+          <button type="button" className={'btn sm' + (isCalled || e.kind === 'lab' ? ' primary' : '')} onClick={book}>{e.kind === 'lab' ? 'Book fitting' : e.kind === 'missed' ? 'Rebook' : 'Book'}</button>
           <Menu label={`More actions for ${p.name}`} items={isCalled
-            ? [...contactItems(p, msg, ' again'), { label: 'Move back to “To call”', onClick: () => update((d) => moveBack(d, v.id)) }, closeIt]
-            : [...contactItems(p, msg), { label: 'Mark as called', onClick: () => { update((d) => markCalled(d, v.id)); toast('Moved to “Called, not booked yet”'); } }, closeIt]} />
+            ? [...contactItems(p, msg, ' again'), { label: 'Move back to “To call”', onClick: () => update((d) => entryCalled(d, e, false)) }, closeIt]
+            : [...contactItems(p, msg), { label: 'Mark as called', onClick: () => { update((d) => entryCalled(d, e)); toast('Moved to “Called, not booked yet”'); } }, closeIt]} />
         </span>
       </li>
     );

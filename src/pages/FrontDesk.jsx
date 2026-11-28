@@ -51,7 +51,7 @@ export default function FrontDesk() {
     return (
       <li className="fd" key={r.k + r.id} data-status={r.st}>
         <span className="tm">{r.time}{r.k === 'q' && <small>#{r.token}</small>}</span>
-        <span className="who2"><b>{p.name}</b> <span className="rs">{r.reason}</span>{!p.verified && <span className="al" style={{ color: 'var(--warn)' }}>New form</span>}{al.length > 0 && <span className="al">{al.join(', ')}</span>}</span>
+        <span className="who2"><b>{p.name}</b> <span className="rs">{r.reason}</span>{!p.verified && <span className="al" style={{ color: 'var(--warn)' }}>New form</span>}{r.st !== 'done' && r.st !== 'checkout' && bal(db, p.id) > 0 && <span className="al">Owes {inr(bal(db, p.id))} from earlier</span>}{al.length > 0 && <span className="al">{al.join(', ')}</span>}</span>
         <span className={'st ' + (late ? 's-lt' : c)}>{late ? 'Late' : l}</span>
         <span className="acts">{act}<Menu items={items} label={`More actions for ${p.name}`} /></span>
       </li>

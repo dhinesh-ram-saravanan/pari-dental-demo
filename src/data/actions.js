@@ -28,6 +28,8 @@ export function bookAppt(db, pid, date, time, reason) {
   const id = 'a' + uid();
   db.appointments.push({ id, pid, date, time, reason, status: 'booked' });
   markBooked(db, pid);
+  // a booking answers the call: if it is later cancelled or missed, the patient needs ringing again
+  db.labOrders.forEach((o) => { if (o.pid === pid) o.calledOn = ''; });
   return { ok: true, id, msg: `Booked ${P(db, pid).name} at ${time} on ${fmtD(date)}` };
 }
 

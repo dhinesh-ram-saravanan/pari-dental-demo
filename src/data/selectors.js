@@ -2,7 +2,7 @@
 import { today, addDays, nowT, fmtD, fill, sum, mins, inr } from '../logic/format.js';
 import { ageOf } from '../logic/age.js';
 import { bal, balOn, owing, totalDues } from '../logic/balance.js';
-import { dueFU } from '../logic/followups.js';
+import { callsDue } from '../logic/followups.js';
 import { invAlerts, invStatus } from '../logic/inventory.js';
 import { labToCall, labOverdue, labText } from '../logic/lab.js';
 import { DOCTOR } from './constants.js';
@@ -94,12 +94,16 @@ export function frontNotices(db) {
   if (co.length) N.push({ k: 'co:' + co.map((x) => x.id).join(','), tone: 'pay', text: `${co.length} patient${s(co.length)} waiting to pay: ${co.map((x) => P(db, x.pid).name).join(', ')}`, act: { label: 'Checkout', do: 'checkout', arg: co[0].id } });
   const dues = owing(db);
   if (dues.length) N.push({ k: 'dues:' + t, tone: 'pay', text: `Pending dues of ${inr(totalDues(db))} from ${dues.length} patients`, act: { label: 'View', do: 'dues' } });
-  const fu = dueFU(db).filter((v) => v.fu !== 'contacted');
-  if (fu.length) N.push({ k: 'fu:' + t, tone: 'info', text: `${fu.length} follow-up${s(fu.length)} to call today or overdue`, act: { label: 'Open calendar', do: 'go', arg: '/calendar' } });
+  const calls = callsDue(db), n = (k) => calls.filter((e) => e.kind === k).length;
+  const why = [n('lab') && `${n('lab')} lab work arrived`, n('missed') && `${n('missed')} missed a booking`, n('fu') && `${n('fu')} follow-up${s(n('fu'))} due`].filter(Boolean).join(', ');
+  if (calls.length) N.push({ k: `fu:${t}:${calls.length}`, tone: 'info', text: `${calls.length} patient${s(calls.length)} to call: ${why}`, act: { label: 'Open calendar', do: 'go', arg: '/calendar' } });
+  // a checkout left open on an earlier day would otherwise drop out of sight
+  const stale = db.queue.filter((x) => x.status === 'checkout' && x.date < t && P(db, x.pid));
+  if (stale.length) N.push({ k: 'oldco:' + stale.map((x) => x.id).join(','), tone: 'pay', text: `${stale.length} checkout${s(stale.length)} not finished from an earlier day: ${stale.map((x) => `${P(db, x.pid).name} (${fmtD(x.date)})`).join(', ')}`, act: { label: 'Checkout', do: 'checkout', arg: stale[0].id } });
   const tm = db.appointments.filter((a) => a.date === addDays(t, 1) && a.status === 'booked');
   if (tm.length) N.push({ k: 'tmr:' + t, tone: 'info', text: `${tm.length} booked for tomorrow. Send WhatsApp reminders.`, act: { label: 'See bookings', do: 'tomorrow' } });
   const ready = labToCall(db);
-  if (ready.length) N.push({ k: 'labin:' + ready.map((o) => o.id).join(','), tone: 'pay', text: `Lab work arrived, call for fitting: ${ready.map((o) => `${P(db, o.pid).name} (${labText(o)})`).join(', ')}`, act: { label: 'Lab work', do: 'go', arg: '/lab' } });
+  if (ready.length) N.push({ k: 'labin:' + ready.map((o) => o.id).join(','), tone: 'pay', text: `Lab work arrived, call for fitting: ${ready.map((o) => `${P(db, o.pid).name} (${labText(o)})`).join(', ')}`, act: { label: 'Call list', do: 'go', arg: '/calendar' } });
   const overdue = labOverdue(db);
   if (overdue.length) N.push({ k: 'lablate:' + overdue.map((o) => o.id).join(','), tone: 'warn', text: `Lab work overdue from the supplier: ${overdue.map((o) => `${labText(o)} for ${P(db, o.pid).name}`).join(', ')}`, act: { label: 'Lab work', do: 'go', arg: '/lab' } });
   const inv = invAlerts(db);
@@ -116,6 +120,8 @@ export function doctorNotices(db) {
   if (inv.length) N.push({ k: 'dinv:' + inv.map((i) => i.id + invStatus(i)[1]).join(','), tone: 'warn', text: stockText(inv), act: { label: 'Inventory', do: 'go', arg: '/inventory' } });
   const od = db.cases.filter((c) => c.status === 'open' && c.ortho).filter((c) => { const last = db.visits.filter((v) => v.caseId === c.id).map((v) => v.date).sort().pop(); return last && last < addDays(today(), -40); });
   if (od.length) N.push({ k: 'orth:' + today(), tone: 'info', text: `${od.length} ortho patient${s(od.length)} not seen for over 40 days: ${od.map((c) => P(db, c.pid).name).join(', ')}`, act: null });
+  const ready = labToCall(db);
+  if (ready.length) N.push({ k: 'dlab:' + ready.map((o) => o.id).join(','), tone: 'info', text: `Lab work arrived, reception is calling for fitting: ${ready.map((o) => `${labText(o)} for ${P(db, o.pid).name}`).join(', ')}`, act: { label: 'Lab work', do: 'go', arg: '/lab' } });
   const dues = owing(db);
   if (dues.length) N.push({ k: 'ddues:' + today(), tone: 'pay', text: `${inr(totalDues(db))} pending from ${dues.length} patients`, act: { label: 'See who', do: 'kpi', arg: 'dues' } });
   return N;
@@ -123,7 +129,7 @@ export function doctorNotices(db) {
 
 export const navCounts = (db) => ({
   '/front-desk': tq(db).filter((x) => x.status === 'checkout').length + db.patients.filter((p) => !p.verified).length,
-  '/calendar': dueFU(db).filter((v) => v.fu !== 'contacted').length,
+  '/calendar': callsDue(db).length,
   '/doctor': tq(db).filter((x) => x.status === 'waiting').length,
   '/clinic': pendingAppr(db).length,
   '/inventory': invAlerts(db).length,

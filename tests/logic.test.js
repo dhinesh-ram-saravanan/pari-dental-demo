@@ -7,7 +7,8 @@ import { ageOf } from '../src/logic/age.js';
 import { bal, balBefore, balOn, sheetRows, priceApprovals } from '../src/logic/balance.js';
 import { validateReg, emptyP, digits, mobileDigits, dobFromParts, savePatient, allocReg, mobileClash, validateBooking, validateStockIn } from '../src/logic/validation.js';
 import { xlDate, parseSheet, importCounts, applyImport, exportRows } from '../src/logic/importParse.js';
-import { callLists, markCalled, moveBack, closeFU, dueFU } from '../src/logic/followups.js';
+import { callLists, markCalled, moveBack, closeFU, dueFU, callEntries, callsDue, entryCalled, entryClose } from '../src/logic/followups.js';
+import { navCounts } from '../src/data/selectors.js';
 import { invStatus, invQty, useStock as takeStock, stockIn } from '../src/logic/inventory.js';
 import { kpiNumbers, kpis } from '../src/logic/kpi.js';
 import { addToQueue, bookAppt, submitBooking, sendIn, handOver, coInit, checkout, payDue, decideApproval, cancelBooking, removeFromQueue, backToWaiting, firstFree } from '../src/data/actions.js';
@@ -440,6 +441,60 @@ describe('lab work: measurement → waiting for supplier → arrived → fitted'
     const o = db.labOrders.find((x) => x.status === 'arrived');
     cancelLab(db, o.id);
     expect(labToCall(db)).toEqual([]);
+  });
+});
+
+describe('call and confirm: one list of everyone reception must ring', () => {
+  const kinds = () => callEntries(db).toCall.map((e) => e.kind);
+  it('arrived lab work is on the call list first, and counted in the badge and the notice', () => {
+    const { toCall } = callEntries(db), lab = toCall[0];
+    expect(lab).toMatchObject({ kind: 'lab', book: 'PFM crown 46 fitting' });
+    expect(lab.reason).toMatch(/has arrived, book the fitting/);
+    expect(navCounts(db)['/calendar']).toBe(callsDue(db).length);
+    expect(frontNotices(db).find((n) => n.k.startsWith('fu:')).text).toMatch(/1 lab work arrived/);
+    expect(new Set(toCall.map((e) => e.pid)).size).toBe(toCall.length); // one line per patient
+    const atLab = db.labOrders.filter((o) => o.status === 'waiting').map((o) => o.pid);
+    expect(toCall.some((e) => atLab.includes(e.pid))).toBe(false); // not rung while the supplier still has it
+    markArrived(db, db.labOrders.find((o) => o.status === 'waiting').id);
+    expect(callEntries(db).toCall.filter((e) => e.kind === 'lab')).toHaveLength(2); // rung as soon as it arrives
+  });
+  it('called → booked → cancelled walks the lab item through both lists and back', () => {
+    const lab = callEntries(db).toCall[0];
+    entryCalled(db, lab);
+    expect(callEntries(db).called.some((e) => e.key === lab.key)).toBe(true);
+    entryCalled(db, lab, false);
+    expect(callEntries(db).toCall.some((e) => e.key === lab.key)).toBe(true);
+    entryCalled(db, lab); // called, then booked, then the booking falls through
+    const r = bookAppt(db, lab.pid, addDays(t, 2), '09:00', lab.book);
+    expect([...callEntries(db).toCall, ...callEntries(db).called].some((e) => e.pid === lab.pid)).toBe(false);
+    expect(labToCall(db)).toEqual([]);
+    cancelBooking(db, r.id);
+    expect(callEntries(db).toCall[0].key).toBe(lab.key);
+  });
+  it('a booking the patient missed puts them on the list; it can be written off', () => {
+    const before = callEntries(db).toCall.length;
+    db.appointments.push({ id: 'ax', pid: 'p5', date: addDays(t, -1), time: '10:00', reason: 'Review', status: 'booked' });
+    const e = callEntries(db).toCall.find((x) => x.kind === 'missed');
+    expect(e).toMatchObject({ pid: 'p5', id: 'ax', book: 'Review' });
+    expect(e.reason).toMatch(/^Did not come on \d\d\/\d\d · Review$/);
+    expect(callEntries(db).toCall.length).toBe(before + 1);
+    entryClose(db, e);
+    expect(db.appointments.at(-1).status).toBe('missed');
+    expect(kinds().includes('missed')).toBe(false);
+  });
+  it('a patient with both a follow-up and a missed booking is listed once, as missed', () => {
+    const fu = callEntries(db).toCall.find((e) => e.kind === 'fu');
+    db.appointments.push({ id: 'ay', pid: fu.pid, date: addDays(t, -2), time: '10:00', reason: fu.reason, status: 'booked' });
+    const mine = callEntries(db).toCall.filter((e) => e.pid === fu.pid);
+    expect(mine.map((e) => e.kind)).toEqual(['missed']);
+  });
+  it('a checkout left open on an earlier day is raised to reception', () => {
+    expect(frontNotices(db).some((n) => n.k.startsWith('oldco:'))).toBe(false);
+    const q = tq(db).find((x) => x.status === 'checkout'); q.date = addDays(t, -1);
+    const n = frontNotices(db).find((x) => x.k.startsWith('oldco:'));
+    expect(n.text).toMatch(/1 checkout not finished from an earlier day/);
+    expect(checkout(db, { ...coInit(db, q.id), paid: '0' }).ok).toBe(true);
+    expect(frontNotices(db).some((x) => x.k.startsWith('oldco:'))).toBe(false);
   });
 });
 
